@@ -91,6 +91,74 @@ mDNS (`letshare.local`) means no IP addresses need to be shared manually — tho
 
 ---
 
+## Monorepo architecture
+
+### The problem it solves
+
+Internet mode and LAN mode are **two separate applications** — different entry points, different signaling servers, different deployment targets (one is a public-facing service, the other runs on a local network and advertises itself via mDNS). However, they share roughly 70% of their codebase: the WebRTC connection logic, file-chunking/transfer protocol, progress tracking, and nearly every UI component (drop zones, progress bars, stat panels, file tables).
+
+Without a monorepo, this shared logic would have to live in one of three bad places:
+
+1. **Duplicated** in both apps — any bug fix or UI tweak has to be made twice, and the two copies drift apart over time.
+2. **Published as a private npm package** — every change to shared code requires a version bump, publish step, and dependency update in both apps before it's usable. Far too much ceremony for an internal library that only these two apps consume.
+3. **Extracted into one app and imported via relative paths** (`../../other-app/src/...`) — creates an implicit dependency between two apps that are supposed to be independently deployable, and breaks if either app's folder is moved.
+
+### The solution: npm workspaces
+
+LetsShare uses **npm workspaces** to host both applications and a shared internal package (`@letshare/core`) in a single repository, with a single `npm install` at the root resolving dependencies for everything:
+
+```
+letshare/
+├── package.json              ← declares the workspaces
+├── packages/
+│   └── core/                  ← @letshare/core — shared internal package
+└── apps/
+    ├── internet/{frontend,backend}/
+    └── lan/{frontend,backend}/
+```
+
+Both `apps/*/frontend/package.json` files list `@letshare/core` as a normal dependency:
+
+```json
+"dependencies": {
+  "@letshare/core": "*"
+}
+```
+
+npm workspaces symlinks `packages/core` into each app's `node_modules/@letshare/core` automatically. There is no build step, no publishing, and no version pinning between internal packages — when you edit a file in `packages/core/src/`, both apps see the change immediately, because they're importing the *actual source files* through a symlink, not a built artifact.
+
+### What this solved concretely in this project
+
+- **One copy of the WebRTC transfer engine.** The chunking, backpressure handling, and DataChannel setup in `useSpeedTracker` and the shared `lib/webrtc.js` constants are written once and used identically by both the Internet and LAN frontends.
+- **One copy of every UI component.** `DropZone`, `ProgressBar`, `RadialProgress`, `Sparkline`, `ReceiverCard`, etc. are visually and behaviorally identical across both apps because they're the *same file*. A design change to `ProgressBar.jsx` instantly applies everywhere.
+- **Independent deployability preserved.** Despite sharing code, `apps/internet` and `apps/lan` remain fully separate deployable units — each has its own `Dockerfile`, its own backend, its own `package.json`, and can be built, versioned, and shipped independently. The shared package is an implementation detail, not a runtime dependency that needs to be deployed separately.
+- **Single dependency tree.** One `npm install` at the root installs and de-duplicates dependencies (React, Vite, Socket.io, etc.) across all four apps plus the core package, using npm's workspace hoisting. No "works on my machine" drift between apps' `node_modules`.
+- **Coordinated tooling.** Root-level scripts (`npm run dev:internet`, `npm run dev:lan`, `npm run build:internet`, `npm run build:lan`) provide a single command surface, while `docker-compose.yml` profiles (`dev`, `prod`, `dev-internet`, `dev-lan`, etc.) let you spin up either or both apps together.
+
+### Trade-offs
+
+**Pros**
+
+- **Zero-friction code sharing** — no publish/version/update cycle for internal code; changes are visible instantly across consumers.
+- **Atomic cross-cutting changes** — a single commit/PR can update a shared component *and* both apps that use it, keeping history and review coherent.
+- **Consistent tooling and standards** — one ESLint config, one Node version (`24.14.0`, enforced via `.nvmrc` and `engines`), one Tailwind theme, shared across every app.
+- **Simplified local development** — one `npm install`, one `.env.example` reference at the root, one `docker-compose.yml` to run everything together for integration testing.
+- **Easier refactoring** — moving logic between "shared" and "app-specific" is a file move, not a cross-repository migration.
+
+**Cons**
+
+- **Larger checkout and install footprint** — cloning the repo and running `npm install` pulls in dependencies for all four apps, even if you only care about one. Mitigated here by npm's hoisting, but the `node_modules` tree is still bigger than a single-app repo.
+- **CI/CD needs path-aware logic** — a naive CI pipeline would rebuild and redeploy both apps on every commit, even if only one changed. Production CI should use path filters (e.g. "only rebuild `apps/internet/*` if files under `apps/internet/` or `packages/core/` changed") to avoid wasted build time and unnecessary deploys.
+- **Implicit coupling risk** — because changes to `packages/core` affect both apps immediately, a breaking change to a shared component can silently break the *other* app if it isn't tested. This requires either running both apps' test suites on every core change, or being disciplined about backward-compatible changes to shared exports.
+- **Single point of version truth** — `@letshare/core` has no independent version number; both apps always consume "whatever is currently in `packages/core`". This is intentional here (no version skew), but means you cannot have one app on an "older" version of a shared component while the other moves ahead — a deliberate trade-off favoring consistency over independent evolution.
+- **Workspace tooling learning curve** — contributors need to understand npm workspaces semantics (e.g. running scripts with `-w <workspace>`, how hoisting affects `node_modules`), which adds a small onboarding cost compared to a plain single-package repo.
+
+### Why this was the right call for LetsShare
+
+The two apps are not just "similar" — they are **two deployment targets for the same underlying transfer engine**, differing primarily in discovery mechanism (link-sharing vs. mDNS lobby) and a handful of UI screens. The shared surface area (WebRTC logic + UI library) is large and changes together; the divergent surface area (signaling server, discovery UI) is cleanly separated into `apps/internet` and `apps/lan`. A monorepo with workspaces matches this shape exactly: shared code lives in one place with zero ceremony, while each app remains an independently buildable, dockerizable, deployable unit.
+
+---
+
 ## Project structure
 
 ```
