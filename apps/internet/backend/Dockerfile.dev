@@ -1,0 +1,24 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  Internet Backend — DEVELOPMENT image                            ║
+# ║                                                                  ║
+# ║  What it does:                                                   ║
+# ║  • Runs server.js under nodemon                                  ║
+# ║  • nodemon watches server.js and auto-restarts on every save     ║
+# ║  • Source is bind-mounted so changes reflect without rebuilding  ║
+# ║                                                                  ║
+# ║  Port: 3001                                                      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY apps/internet/backend/package.json ./apps/internet/backend/package.json
+RUN npm install
+
+COPY apps/internet/backend ./apps/internet/backend
+
+EXPOSE 3001
+
+CMD ["npm", "run", "dev", "-w", "apps/internet/backend"]

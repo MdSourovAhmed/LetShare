@@ -1,0 +1,30 @@
+{
+  "name": "letshare",
+  "private": true,
+  "version": "1.0.0",
+  "description": "P2P file sharing — Internet and LAN modes",
+  "workspaces": [
+    "packages/core",
+    "apps/internet/frontend",
+    "apps/internet/backend",
+    "apps/lan/frontend",
+    "apps/lan/backend"
+  ],
+  "scripts": {
+    "dev:internet": "concurrently \"npm run dev -w apps/internet/backend\" \"npm run dev -w apps/internet/frontend\"",
+    "dev:lan": "concurrently \"npm run dev -w apps/lan/backend\" \"npm run dev -w apps/lan/frontend\"",
+    "dev:all": "concurrently \"npm run dev -w apps/internet/backend\" \"npm run dev -w apps/internet/frontend\" \"npm run dev -w apps/lan/backend\" \"npm run dev -w apps/lan/frontend\"",
+    "build:internet": "npm run build -w apps/internet/frontend",
+    "build:lan": "npm run build -w apps/lan/frontend",
+    "build:all": "npm run build:internet && npm run build:lan",
+    "start:internet": "npm run start -w apps/internet/backend",
+    "start:lan": "npm run start -w apps/lan/backend"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  },
+  "engines": {
+    "node": ">=24",
+    "npm": ">=10"
+  }
+}

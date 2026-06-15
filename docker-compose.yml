@@ -1,0 +1,183 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  LetsShare — Docker Compose                                              ║
+# ║                                                                          ║
+# ║  Two profiles:                                                           ║
+# ║                                                                          ║
+# ║  dev  →  docker compose --profile dev up                                 ║
+# ║          Starts all four containers with HMR / nodemon.                  ║
+# ║          Source is bind-mounted — edit files on host, see changes live.  ║
+# ║                                                                          ║
+# ║  prod →  docker compose --profile prod up --build                        ║
+# ║          Builds optimised images. Frontend: nginx. Backend: node prod.   ║
+# ║          Set env vars in .env before running.                            ║
+# ║                                                                          ║
+# ║  You can also run a single app's profile:                                ║
+# ║    docker compose --profile dev-internet up                              ║
+# ║    docker compose --profile dev-lan up                                   ║
+# ║                                                                          ║
+# ║  mDNS note: The LAN backend needs network_mode: host on Linux to        ║
+# ║  advertise letshare.local. On macOS/Windows use native node instead.     ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # INTERNET APP
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ── Internet backend — dev ─────────────────────────────────────────────────
+  internet-backend-dev:
+    profiles: [dev, dev-internet]
+    build:
+      context: .                                  # build context is monorepo root
+      dockerfile: apps/internet/backend/Dockerfile.dev
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./apps/internet/backend:/app/apps/internet/backend  # live reload
+      - internet_backend_modules:/app/node_modules          # container's node_modules
+    environment:
+      PORT: 3001
+      CORS_ORIGIN: "*"
+    networks: [letshare-net]
+    restart: unless-stopped
+
+  # ── Internet frontend — dev ────────────────────────────────────────────────
+  internet-frontend-dev:
+    profiles: [dev, dev-internet]
+    build:
+      context: .
+      dockerfile: apps/internet/frontend/Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/internet/frontend:/app/apps/internet/frontend  # HMR source
+      - ./packages/core:/app/packages/core                    # shared core
+      - internet_frontend_modules:/app/node_modules
+    environment:
+      VITE_BACKEND_URL: ""    # empty = Vite proxy handles /socket.io → backend
+    depends_on:
+      - internet-backend-dev
+    networks: [letshare-net]
+    restart: unless-stopped
+
+  # ── Internet backend — prod ────────────────────────────────────────────────
+  internet-backend-prod:
+    profiles: [prod, prod-internet]
+    build:
+      context: .
+      dockerfile: apps/internet/backend/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      CORS_ORIGIN: "${INTERNET_CORS_ORIGIN:-*}"
+    networks: [letshare-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Internet frontend — prod (nginx) ───────────────────────────────────────
+  internet-frontend-prod:
+    profiles: [prod, prod-internet]
+    build:
+      context: .
+      dockerfile: apps/internet/frontend/Dockerfile
+      args:
+        # Baked into JS bundle — must be the URL browsers use to reach the backend
+        VITE_BACKEND_URL: "${VITE_BACKEND_URL:-}"
+    ports:
+      - "80:80"
+    depends_on:
+      internet-backend-prod:
+        condition: service_healthy
+    networks: [letshare-net]
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # LAN APP
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ── LAN backend — dev ─────────────────────────────────────────────────────
+  lan-backend-dev:
+    profiles: [dev, dev-lan]
+    build:
+      context: .
+      dockerfile: apps/lan/backend/Dockerfile.dev
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./apps/lan/backend:/app/apps/lan/backend
+      - lan_backend_modules:/app/node_modules
+    environment:
+      PORT: 3002
+    # network_mode: host    # ← Uncomment on Linux for real mDNS (letshare.local)
+    #                         # On macOS/Windows, run the backend natively instead.
+    networks: [letshare-net]
+    restart: unless-stopped
+
+  # ── LAN frontend — dev ────────────────────────────────────────────────────
+  lan-frontend-dev:
+    profiles: [dev, dev-lan]
+    build:
+      context: .
+      dockerfile: apps/lan/frontend/Dockerfile.dev
+    ports:
+      - "5174:5174"
+    volumes:
+      - ./apps/lan/frontend:/app/apps/lan/frontend
+      - ./packages/core:/app/packages/core
+      - lan_frontend_modules:/app/node_modules
+    depends_on:
+      - lan-backend-dev
+    networks: [letshare-net]
+    restart: unless-stopped
+
+  # ── LAN backend — prod ────────────────────────────────────────────────────
+  lan-backend-prod:
+    profiles: [prod, prod-lan]
+    build:
+      context: .
+      dockerfile: apps/lan/backend/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+    # network_mode: host    # ← Uncomment on Linux for mDNS
+    networks: [letshare-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── LAN frontend — prod (nginx) ────────────────────────────────────────────
+  lan-frontend-prod:
+    profiles: [prod, prod-lan]
+    build:
+      context: .
+      dockerfile: apps/lan/frontend/Dockerfile
+    ports:
+      - "8080:80"       # port 8080 on host → 80 inside container
+    depends_on:
+      lan-backend-prod:
+        condition: service_healthy
+    networks: [letshare-net]
+    restart: unless-stopped
+
+# ── Named volumes (node_modules stay inside containers) ──────────────────────
+# These prevent the host's node_modules (or absence of them) from leaking
+# into the container. Each container manages its own dependency tree.
+volumes:
+  internet_backend_modules:
+  internet_frontend_modules:
+  lan_backend_modules:
+  lan_frontend_modules:
+
+networks:
+  letshare-net:
+    driver: bridge

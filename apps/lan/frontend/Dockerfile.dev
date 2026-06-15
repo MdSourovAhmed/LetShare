@@ -1,0 +1,24 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  LAN Frontend — DEVELOPMENT image                                ║
+# ║                                                                  ║
+# ║  Same pattern as internet dev image. Vite dev server with HMR.  ║
+# ║  Proxy in vite.config.js forwards /socket.io → lan backend.     ║
+# ║                                                                  ║
+# ║  Port: 5174 (separate from internet app's 5173)                  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY packages/core/package.json ./packages/core/package.json
+COPY apps/lan/frontend/package.json ./apps/lan/frontend/package.json
+RUN npm install
+
+COPY packages/core ./packages/core
+COPY apps/lan/frontend ./apps/lan/frontend
+
+EXPOSE 5174
+
+CMD ["npm", "run", "dev", "-w", "apps/lan/frontend"]

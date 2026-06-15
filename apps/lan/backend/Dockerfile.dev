@@ -1,0 +1,28 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  LAN Backend — DEVELOPMENT image                                 ║
+# ║                                                                  ║
+# ║  Runs with nodemon. Advertises mDNS via Bonjour on startup.      ║
+# ║                                                                  ║
+# ║  Network mode note:                                              ║
+# ║  mDNS uses multicast, which does not work inside Docker's        ║
+# ║  default bridge network. Use network_mode: host in docker-       ║
+# ║  compose (Linux) or run the backend directly on the host for     ║
+# ║  mDNS to work. On macOS/Windows, Docker Desktop's NAT layer      ║
+# ║  blocks multicast — run the backend natively there.              ║
+# ║                                                                  ║
+# ║  Port: 3002                                                      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY apps/lan/backend/package.json ./apps/lan/backend/package.json
+RUN npm install
+
+COPY apps/lan/backend ./apps/lan/backend
+
+EXPOSE 3002
+
+CMD ["npm", "run", "dev", "-w", "apps/lan/backend"]

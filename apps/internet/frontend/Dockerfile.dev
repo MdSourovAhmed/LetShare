@@ -1,0 +1,35 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  Internet Frontend — DEVELOPMENT image                           ║
+# ║                                                                  ║
+# ║  What it does:                                                   ║
+# ║  • Runs the Vite dev server with Hot Module Replacement (HMR)   ║
+# ║  • Source code is bind-mounted from the host, so every file     ║
+# ║    save reflects in the browser instantly — no rebuild needed    ║
+# ║  • node_modules lives inside the container (anonymous volume)    ║
+# ║    so the host OS never needs npm installed                      ║
+# ║                                                                  ║
+# ║  Port: 5173                                                      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+# ── 1. Install deps first (cached layer) ─────────────────────────────────────
+# Copy only manifests so Docker cache is not busted on every source change.
+# The monorepo root package.json is needed for workspace resolution.
+COPY package.json package-lock.json* ./
+# Copy the core package manifest (workspace dependency)
+COPY packages/core/package.json ./packages/core/package.json
+COPY apps/internet/frontend/package.json ./apps/internet/frontend/package.json
+
+RUN npm install
+
+# ── 2. Copy source (fallback if not bind-mounting) ───────────────────────────
+COPY packages/core ./packages/core
+COPY apps/internet/frontend ./apps/internet/frontend
+
+EXPOSE 5173
+
+# Run the dev script from the workspace
+CMD ["npm", "run", "dev", "-w", "apps/internet/frontend"]
