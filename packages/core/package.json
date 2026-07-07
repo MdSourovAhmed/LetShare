@@ -1,12 +1,14 @@
 {
   "name": "@letshare/core",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "exports": {
     "./lib/utils":                       "./src/lib/utils.js",
     "./lib/webrtc":                      "./src/lib/webrtc.js",
+    "./lib/transferEngine":              "./src/lib/transferEngine.js",
     "./hooks/useSpeedTracker":           "./src/hooks/useSpeedTracker.js",
+    "./hooks/useThrottledProgress":      "./src/hooks/useThrottledProgress.js",
     "./components/ui/Abc":               "./src/components/ui/Abc.jsx",
     "./components/ui/DropZone":          "./src/components/ui/DropZone.jsx",
     "./components/ui/FileIcon":          "./src/components/ui/FileIcon.jsx",

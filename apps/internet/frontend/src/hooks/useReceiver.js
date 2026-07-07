@@ -1,7 +1,373 @@
+// // import React, { useState, useRef, useEffect, useCallback } from 'react'
+// // import createSocket from '../lib/socket'
+// // import { RTC_CONFIG, CONNECT_TIMEOUT_MS } from '@letshare/core/lib/webrtc'
+// // import { useSpeedTracker } from '@letshare/core/hooks/useSpeedTracker'
+
+// // export function useReceiver(linkId) {
+// //   const [state, setState] = useState({
+// //     phase: 'idle',
+// //     statusText: 'Initializing…',
+// //     fileRows: [],
+// //     totalSize: 0,
+// //     totalReceived: 0,
+// //     startedAt: null,
+// //     finishedAt: null,
+// //   })
+
+// //   const { speedBps, speedHistory, peakBps, onBytes, reset: resetSpeed } = useSpeedTracker()
+
+// //   const socketRef = useRef(null)
+// //   const pcRef = useRef(null)
+// //   const dcRef = useRef(null)
+
+// //   const buffers = useRef([])
+// //   const fileReceived = useRef([])
+// //   const currentIndex = useRef(-1)
+// //   const filesMeta = useRef([])
+// //   const totalSizeRef = useRef(0)
+
+// //   const patch = useCallback((p) => setState((s) => ({ ...s, ...p })), [])
+
+// //   useEffect(() => {
+// //     if (!linkId) { patch({ phase: 'error', statusText: 'No link ID in URL.' }); return }
+
+// //     patch({ phase: 'connecting', statusText: 'Connecting to sender…' })
+// //     resetSpeed()
+
+// //     const socket = createSocket()
+// //     socketRef.current = socket
+
+// //     socket.on('connect_error', () =>
+// //       patch({ phase: 'error', statusText: 'Could not reach signaling server.' }))
+
+// //     socket.on('signal', async ({ fromSocketId, payload }) => {
+// //       try {
+// //         if (payload.type === 'offer') {
+// //           if (pcRef.current) pcRef.current.close()
+// //           pcRef.current = null
+// //           buildPeerConnection(socket, linkId, fromSocketId)
+// //           const pc = pcRef.current
+// //           await pc.setRemoteDescription(payload.sdp)
+// //           const answer = await pc.createAnswer()
+// //           await pc.setLocalDescription(answer)
+// //           socket.emit('signal', {
+// //             linkId, toSocketId: fromSocketId,
+// //             payload: { type: 'answer', sdp: answer }
+// //           })
+// //         } else if (payload.type === 'ice' && pcRef.current) {
+// //           await pcRef.current.addIceCandidate(payload.candidate)
+// //         }
+// //       } catch (e) {
+// //         console.error('receiver signal error', e)
+// //         patch({ phase: 'error', statusText: 'Connection error.' })
+// //       }
+// //     })
+
+// //     socket.emit('join', { linkId, role: 'receiver' })
+
+// //     const timeout = setTimeout(() => {
+// //       if (!dcRef.current || dcRef.current.readyState !== 'open')
+// //         patch({ phase: 'error', statusText: 'Timeout — no sender connected.' })
+// //     }, CONNECT_TIMEOUT_MS)
+
+// //     return () => {
+// //       clearTimeout(timeout)
+// //       try { dcRef.current?.close() } catch { }
+// //       try { pcRef.current?.close() } catch { }
+// //       socket.disconnect()
+// //     }
+// //   }, [linkId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+// //   function buildPeerConnection(socket, linkId, senderSocketId) {
+// //     const pc = new RTCPeerConnection(RTC_CONFIG)
+// //     pcRef.current = pc
+
+// //     pc.onicecandidate = (e) => {
+// //       if (e.candidate)
+// //         socket.emit('signal', {
+// //           linkId, toSocketId: senderSocketId,
+// //           payload: { type: 'ice', candidate: e.candidate }
+// //         })
+// //     }
+
+// //     pc.ondatachannel = (e) => {
+// //       const dc = e.channel
+// //       dcRef.current = dc
+// //       dc.binaryType = 'arraybuffer'
+// //       dc.onopen = () => patch({ phase: 'receiving', statusText: 'Receiving files…', startedAt: Date.now() })
+// //       dc.onmessage = onData
+// //       dc.onclose = () => patch({ statusText: 'Connection closed.' })
+// //     }
+// //   }
+
+// //   function onData(e) {
+// //     const data = e.data
+
+// //     if (typeof data === 'string') {
+// //       try {
+// //         const msg = JSON.parse(data)
+// //         if (msg?.type === 'manifest') {
+// //           const meta = msg.files || []
+// //           filesMeta.current = meta
+// //           totalSizeRef.current = meta.reduce((s, f) => s + (f.size || 0), 0)
+// //           buffers.current = meta.map(() => [])
+// //           fileReceived.current = meta.map(() => 0)
+// //           currentIndex.current = -1
+// //           patch({
+// //             totalSize: totalSizeRef.current,
+// //             fileRows: meta.map((f) => ({
+// //               path: f.path || f.name, name: f.name,
+// //               size: f.size, type: f.type, progress: 0, url: null
+// //             }))
+// //           })
+// //           return
+// //         }
+// //         if (msg?.type === 'start') { currentIndex.current = msg.index; return }
+// //         if (msg?.type === 'end') {
+// //           const i = msg.index
+// //           const blob = new Blob(buffers.current[i],
+// //             { type: filesMeta.current[i]?.type || 'application/octet-stream' })
+// //           const url = URL.createObjectURL(blob)
+// //           setState((s) => ({
+// //             ...s,
+// //             fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress: 100, url } : r),
+// //           }))
+// //           return
+// //         }
+// //         if (msg?.type === 'all_done') {
+// //           patch({ phase: 'done', statusText: 'All files received!', finishedAt: Date.now() })
+// //           return
+// //         }
+// //       } catch { }
+// //     }
+
+// //     const ab = data instanceof ArrayBuffer ? data : null
+// //     if (!ab || currentIndex.current < 0) return
+
+// //     const i = currentIndex.current
+// //     buffers.current[i].push(new Uint8Array(ab))
+// //     fileReceived.current[i] += ab.byteLength
+
+// //     // Feed speed tracker — pure client arithmetic, nothing sent to server
+// //     onBytes(ab.byteLength)
+
+// //     const size = filesMeta.current[i]?.size || 0
+// //     const progress = size ? Math.floor((fileReceived.current[i] / size) * 100) : 0
+// //     const totalReceived = fileReceived.current.reduce((s, x) => s + x, 0)
+
+// //     setState((s) => ({
+// //       ...s, totalReceived,
+// //       fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress } : r),
+// //     }))
+// //   }
+
+// //   return { state, speedBps, speedHistory, peakBps }
+// // }
+
+
+
+
+// /**
+//  * useReceiver — v2 optimized
+//  *
+//  * Changes from v1:
+//  *   • Progress state updates throttled via useThrottledProgress — v1 called
+//  *     setState() on every incoming chunk (potentially 1000s/sec on a fast
+//  *     link), now batched to ~10 renders/sec.
+//  *   • RTC_CONFIG includes ICE pre-gathering + TURN slot (see lib/webrtc.js).
+//  *   • Larger chunk sizes from the sender mean fewer onmessage events overall
+//  *     for the same file size — less event-handler overhead on this side too.
+//  */
+// import React, { useState, useRef, useEffect, useCallback } from 'react'
+// import  createSocket  from '../lib/socket'
+// import { CONNECT_TIMEOUT_MS } from '@letshare/core/lib/webrtc'
+// import { RTC_CONFIG } from '../lib/rtcConfig'
+// import { useSpeedTracker } from '@letshare/core/hooks/useSpeedTracker'
+// import { useThrottledProgress } from '@letshare/core/hooks/useThrottledProgress'
+
+// export function useReceiver(linkId) {
+//   const [state, setState] = useState({
+//     phase: 'idle',
+//     statusText: 'Initializing…',
+//     fileRows: [],
+//     totalSize: 0,
+//     totalReceived: 0,
+//     startedAt: null,
+//     finishedAt: null,
+//   })
+
+//   const { speedBps, speedHistory, peakBps, onBytes, reset: resetSpeed } = useSpeedTracker()
+//   const { throttledUpdate, flushNow } = useThrottledProgress(100)
+
+//   const socketRef  = useRef(null)
+//   const pcRef      = useRef(null)
+//   const dcRef      = useRef(null)
+
+//   const buffers      = useRef([])
+//   const fileReceived = useRef([])
+//   const currentIndex = useRef(-1)
+//   const filesMeta    = useRef([])
+//   const totalSizeRef = useRef(0)
+
+//   const patch = useCallback((p) => setState((s) => ({ ...s, ...p })), [])
+
+//   useEffect(() => {
+//     if (!linkId) { patch({ phase: 'error', statusText: 'No link ID in URL.' }); return }
+
+//     patch({ phase: 'connecting', statusText: 'Connecting to sender…' })
+//     resetSpeed()
+
+//     const socket = createSocket()
+//     socketRef.current = socket
+
+//     socket.on('connect_error', () =>
+//       patch({ phase: 'error', statusText: 'Could not reach signaling server.' }))
+
+//     socket.on('signal', async ({ fromSocketId, payload }) => {
+//       try {
+//         if (payload.type === 'offer') {
+//           if (pcRef.current) pcRef.current.close()
+//           pcRef.current = null
+//           buildPeerConnection(socket, linkId, fromSocketId)
+//           const pc = pcRef.current
+//           await pc.setRemoteDescription(payload.sdp)
+//           const answer = await pc.createAnswer()
+//           await pc.setLocalDescription(answer)
+//           socket.emit('signal', { linkId, toSocketId: fromSocketId,
+//             payload: { type: 'answer', sdp: answer } })
+//         } else if (payload.type === 'ice' && pcRef.current) {
+//           await pcRef.current.addIceCandidate(payload.candidate)
+//         }
+//       } catch (e) {
+//         console.error('receiver signal error', e)
+//         patch({ phase: 'error', statusText: 'Connection error.' })
+//       }
+//     })
+
+//     socket.emit('join', { linkId, role: 'receiver' })
+
+//     const timeout = setTimeout(() => {
+//       if (!dcRef.current || dcRef.current.readyState !== 'open')
+//         patch({ phase: 'error', statusText: 'Timeout — no sender connected.' })
+//     }, CONNECT_TIMEOUT_MS)
+
+//     return () => {
+//       clearTimeout(timeout)
+//       try { dcRef.current?.close() } catch {}
+//       try { pcRef.current?.close() } catch {}
+//       socket.disconnect()
+//     }
+//   }, [linkId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+//   function buildPeerConnection(socket, linkId, senderSocketId) {
+//     const pc = new RTCPeerConnection(RTC_CONFIG)
+//     pcRef.current = pc
+
+//     pc.onicecandidate = (e) => {
+//       if (e.candidate)
+//         socket.emit('signal', { linkId, toSocketId: senderSocketId,
+//           payload: { type: 'ice', candidate: e.candidate } })
+//     }
+
+//     pc.ondatachannel = (e) => {
+//       const dc = e.channel
+//       dcRef.current = dc
+//       dc.binaryType = 'arraybuffer'
+//       dc.onopen    = () => patch({ phase: 'receiving', statusText: 'Receiving files…', startedAt: Date.now() })
+//       dc.onmessage = onData
+//       dc.onclose   = () => patch({ statusText: 'Connection closed.' })
+//     }
+//   }
+
+//   function onData(e) {
+//     const data = e.data
+
+//     if (typeof data === 'string') {
+//       try {
+//         const msg = JSON.parse(data)
+//         if (msg?.type === 'manifest') {
+//           const meta = msg.files || []
+//           filesMeta.current    = meta
+//           totalSizeRef.current = meta.reduce((s, f) => s + (f.size || 0), 0)
+//           buffers.current      = meta.map(() => [])
+//           fileReceived.current = meta.map(() => 0)
+//           currentIndex.current = -1
+//           patch({ totalSize: totalSizeRef.current,
+//             fileRows: meta.map((f) => ({ path: f.path || f.name, name: f.name,
+//               size: f.size, type: f.type, progress: 0, url: null })) })
+//           return
+//         }
+//         if (msg?.type === 'start') { currentIndex.current = msg.index; return }
+//         if (msg?.type === 'end') {
+//           const i    = msg.index
+//           // Blob constructor accepts an array of Uint8Arrays directly —
+//           // no manual concatenation needed; the browser handles this
+//           // efficiently internally regardless of chunk count.
+//           const blob = new Blob(buffers.current[i],
+//             { type: filesMeta.current[i]?.type || 'application/octet-stream' })
+//           const url  = URL.createObjectURL(blob)
+//           buffers.current[i] = []   // release chunk references for GC
+
+//           flushNow()  // ensure final progress for this file renders immediately
+//           setState((s) => ({
+//             ...s,
+//             fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress: 100, url } : r),
+//           }))
+//           return
+//         }
+//         if (msg?.type === 'all_done') {
+//           flushNow()
+//           patch({ phase: 'done', statusText: 'All files received!', finishedAt: Date.now() })
+//           return
+//         }
+//       } catch {}
+//     }
+
+//     const ab = data instanceof ArrayBuffer ? data : null
+//     if (!ab || currentIndex.current < 0) return
+
+//     const i = currentIndex.current
+//     buffers.current[i].push(new Uint8Array(ab))
+//     fileReceived.current[i] += ab.byteLength
+
+//     // Speed tracker is already internally throttled to 250ms — call every chunk
+//     onBytes(ab.byteLength)
+
+//     const size          = filesMeta.current[i]?.size || 0
+//     const progress      = size ? Math.floor((fileReceived.current[i] / size) * 100) : 0
+//     const totalReceived = fileReceived.current.reduce((s, x) => s + x, 0)
+
+//     // v2: throttled — at most ~10 renders/sec instead of one per incoming chunk
+//     throttledUpdate(() => {
+//       setState((s) => ({
+//         ...s, totalReceived,
+//         fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress } : r),
+//       }))
+//     })
+//   }
+
+//   return { state, speedBps, speedHistory, peakBps }
+// }
+
+
+
+
+
+
+/**
+ * useReceiver — v2.1
+ *
+ * Same timeout + cancel fixes as useJoinSession:
+ * - HANDSHAKE_TIMEOUT_MS cleared when DataChannel opens
+ * - cancel() exposed for UI cancel button
+ * - 'cancelled' message from sender handled gracefully
+ */
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import createSocket from '../lib/socket'
-import { RTC_CONFIG, CONNECT_TIMEOUT_MS } from '@letshare/core/lib/webrtc'
+import  createSocket  from '../lib/socket'
+import { RTC_CONFIG, HANDSHAKE_TIMEOUT_MS } from '@letshare/core/lib/webrtc'
+import { RTC_CONFIG as FULL_RTC_CONFIG } from '../lib/rtcConfig'
 import { useSpeedTracker } from '@letshare/core/hooks/useSpeedTracker'
+import { useThrottledProgress } from '@letshare/core/hooks/useThrottledProgress'
 
 export function useReceiver(linkId) {
   const [state, setState] = useState({
@@ -15,18 +381,27 @@ export function useReceiver(linkId) {
   })
 
   const { speedBps, speedHistory, peakBps, onBytes, reset: resetSpeed } = useSpeedTracker()
+  const { throttledUpdate, flushNow } = useThrottledProgress(100)
 
-  const socketRef = useRef(null)
-  const pcRef = useRef(null)
-  const dcRef = useRef(null)
+  const socketRef      = useRef(null)
+  const pcRef          = useRef(null)
+  const dcRef          = useRef(null)
+  const handshakeTimer = useRef(null)
 
-  const buffers = useRef([])
+  const buffers      = useRef([])
   const fileReceived = useRef([])
   const currentIndex = useRef(-1)
-  const filesMeta = useRef([])
+  const filesMeta    = useRef([])
   const totalSizeRef = useRef(0)
 
   const patch = useCallback((p) => setState((s) => ({ ...s, ...p })), [])
+
+  function clearHandshakeTimer() {
+    if (handshakeTimer.current) {
+      clearTimeout(handshakeTimer.current)
+      handshakeTimer.current = null
+    }
+  }
 
   useEffect(() => {
     if (!linkId) { patch({ phase: 'error', statusText: 'No link ID in URL.' }); return }
@@ -50,10 +425,8 @@ export function useReceiver(linkId) {
           await pc.setRemoteDescription(payload.sdp)
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
-          socket.emit('signal', {
-            linkId, toSocketId: fromSocketId,
-            payload: { type: 'answer', sdp: answer }
-          })
+          socket.emit('signal', { linkId, toSocketId: fromSocketId,
+            payload: { type: 'answer', sdp: answer } })
         } else if (payload.type === 'ice' && pcRef.current) {
           await pcRef.current.addIceCandidate(payload.candidate)
         }
@@ -65,69 +438,73 @@ export function useReceiver(linkId) {
 
     socket.emit('join', { linkId, role: 'receiver' })
 
-    const timeout = setTimeout(() => {
-      if (!dcRef.current || dcRef.current.readyState !== 'open')
-        patch({ phase: 'error', statusText: 'Timeout — no sender connected.' })
-    }, CONNECT_TIMEOUT_MS)
+    // Guard handshake only — cleared the moment DataChannel opens
+    handshakeTimer.current = setTimeout(() => {
+      if (dcRef.current?.readyState === 'open') return
+      patch({ phase: 'error', statusText: 'Timeout — sender may be offline.' })
+    }, HANDSHAKE_TIMEOUT_MS)
 
     return () => {
-      clearTimeout(timeout)
-      try { dcRef.current?.close() } catch { }
-      try { pcRef.current?.close() } catch { }
+      clearHandshakeTimer()
+      try { dcRef.current?.close() } catch {}
+      try { pcRef.current?.close() } catch {}
       socket.disconnect()
     }
   }, [linkId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function buildPeerConnection(socket, linkId, senderSocketId) {
-    const pc = new RTCPeerConnection(RTC_CONFIG)
+    const pc = new RTCPeerConnection(FULL_RTC_CONFIG)
     pcRef.current = pc
 
     pc.onicecandidate = (e) => {
       if (e.candidate)
-        socket.emit('signal', {
-          linkId, toSocketId: senderSocketId,
-          payload: { type: 'ice', candidate: e.candidate }
-        })
+        socket.emit('signal', { linkId, toSocketId: senderSocketId,
+          payload: { type: 'ice', candidate: e.candidate } })
     }
 
     pc.ondatachannel = (e) => {
       const dc = e.channel
       dcRef.current = dc
       dc.binaryType = 'arraybuffer'
-      dc.onopen = () => patch({ phase: 'receiving', statusText: 'Receiving files…', startedAt: Date.now() })
+      dc.onopen = () => {
+        clearHandshakeTimer()   // ← fix: stop the 30s clock once we're transferring
+        patch({ phase: 'receiving', statusText: 'Receiving files…', startedAt: Date.now() })
+      }
       dc.onmessage = onData
-      dc.onclose = () => patch({ statusText: 'Connection closed.' })
+      dc.onclose = () => {
+        patch((s) => s.phase === 'done' || s.phase === 'cancelled'
+          ? s
+          : { phase: 'error', statusText: 'Connection lost.' })
+      }
     }
   }
 
   function onData(e) {
     const data = e.data
-
     if (typeof data === 'string') {
       try {
         const msg = JSON.parse(data)
         if (msg?.type === 'manifest') {
           const meta = msg.files || []
-          filesMeta.current = meta
+          filesMeta.current    = meta
           totalSizeRef.current = meta.reduce((s, f) => s + (f.size || 0), 0)
-          buffers.current = meta.map(() => [])
+          buffers.current      = meta.map(() => [])
           fileReceived.current = meta.map(() => 0)
           currentIndex.current = -1
-          patch({
-            totalSize: totalSizeRef.current,
-            fileRows: meta.map((f) => ({
-              path: f.path || f.name, name: f.name,
-              size: f.size, type: f.type, progress: 0, url: null
-            }))
-          })
+          patch({ totalSize: totalSizeRef.current,
+            fileRows: meta.map((f) => ({ path: f.path || f.name, name: f.name,
+              size: f.size, type: f.type, progress: 0, url: null })) })
           return
         }
         if (msg?.type === 'start') { currentIndex.current = msg.index; return }
         if (msg?.type === 'end') {
-          const i = msg.index
+          const i    = msg.index
           const blob = new Blob(buffers.current[i],
             { type: filesMeta.current[i]?.type || 'application/octet-stream' })
-          const url = URL.createObjectURL(blob)
+          const url  = URL.createObjectURL(blob)
+          buffers.current[i] = []
+
+          flushNow()
           setState((s) => ({
             ...s,
             fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress: 100, url } : r),
@@ -135,10 +512,16 @@ export function useReceiver(linkId) {
           return
         }
         if (msg?.type === 'all_done') {
+          flushNow()
           patch({ phase: 'done', statusText: 'All files received!', finishedAt: Date.now() })
           return
         }
-      } catch { }
+        if (msg?.type === 'cancelled') {
+          flushNow()
+          patch({ phase: 'cancelled', statusText: 'Sender cancelled the transfer.' })
+          return
+        }
+      } catch {}
     }
 
     const ab = data instanceof ArrayBuffer ? data : null
@@ -147,18 +530,18 @@ export function useReceiver(linkId) {
     const i = currentIndex.current
     buffers.current[i].push(new Uint8Array(ab))
     fileReceived.current[i] += ab.byteLength
-
-    // Feed speed tracker — pure client arithmetic, nothing sent to server
     onBytes(ab.byteLength)
 
-    const size = filesMeta.current[i]?.size || 0
-    const progress = size ? Math.floor((fileReceived.current[i] / size) * 100) : 0
+    const size          = filesMeta.current[i]?.size || 0
+    const progress      = size ? Math.floor((fileReceived.current[i] / size) * 100) : 0
     const totalReceived = fileReceived.current.reduce((s, x) => s + x, 0)
 
-    setState((s) => ({
-      ...s, totalReceived,
-      fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress } : r),
-    }))
+    throttledUpdate(() => {
+      setState((s) => ({
+        ...s, totalReceived,
+        fileRows: s.fileRows.map((r, idx) => idx === i ? { ...r, progress } : r),
+      }))
+    })
   }
 
   return { state, speedBps, speedHistory, peakBps }

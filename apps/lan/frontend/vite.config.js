@@ -22,8 +22,9 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    allowedHosts: ['letshare.home','letshare.local'],
     host: "0.0.0.0",
-    port: 5173,
+    port: 5174,
     proxy: {
       "/socket.io": {
         target: process.env.VITE_BACKEND_URL || "http://localhost:3002",
