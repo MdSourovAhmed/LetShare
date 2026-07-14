@@ -1,7 +1,7 @@
 {
   "name": "letshare",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "P2P file sharing — Internet and LAN modes",
   "workspaces": [
     "packages/core",

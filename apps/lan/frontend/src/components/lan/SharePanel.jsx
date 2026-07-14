@@ -1,33 +1,33 @@
+
+
+
 import React, { useState } from 'react'
 import clsx from 'clsx'
-import { formatBytes } from '@letshare/core/lib/utils'
-import DropZone     from '@letshare/core/components/ui/DropZone'
-import SessionSummary from '@letshare/core/components/ui/SessionSummary'
-import TransferLog  from './TransferLog'
+import DropZone        from '@letshare/core/components/ui/DropZone'
+import SenderFileTable from '@letshare/core/components/ui/SenderFileTable'
+import SessionSummary  from '@letshare/core/components/ui/SessionSummary'
+import TransferLog     from './TransferLog'
 
-/**
- * The sharer's control panel.
- * Shows: file picker → access mode selector → announce button → live transfer log.
- */
 export default function SharePanel({ shareSession }) {
   const {
-    phase, sessionId, receivers, fileList, selectedFiles, totalSize, selectionMode,
-    handleFilesSelected, announce, closeSession,
+    phase, receivers, fileList, selectedFiles, totalSize,
+    handleFilesSelected, removeFile, announce, skipFile, closeSession,
   } = shareSession
 
-  const [mode,    setMode]    = useState('open')
-  const [pin,     setPin]     = useState('')
-  const [pinErr,  setPinErr]  = useState('')
+  const [mode,   setMode]   = useState('open')
+  const [pin,    setPin]    = useState('')
+  const [pinErr, setPinErr] = useState('')
 
   const isIdle   = phase === 'idle'
   const isActive = phase === 'active'
   const isDone   = phase === 'done'
 
+  // Progress for the first actively-transferring receiver
+  const firstActive    = receivers.find((r) => r.phase === 'transferring')
+  const fileProgress   = firstActive?.fileProgress ?? []
+
   const handleAnnounce = () => {
-    if (mode === 'pin' && pin.length < 4) {
-      setPinErr('PIN must be at least 4 digits.')
-      return
-    }
+    if (mode === 'pin' && pin.length < 4) { setPinErr('PIN must be at least 4 digits.'); return }
     setPinErr('')
     announce({ mode, pin: mode === 'pin' ? pin : null })
   }
@@ -35,7 +35,7 @@ export default function SharePanel({ shareSession }) {
   return (
     <div className="space-y-5">
 
-      {/* File picker — only shown when idle */}
+      {/* ── IDLE: file picker + mode selector + announce ──────────────────── */}
       {isIdle && (
         <>
           <DropZone
@@ -43,6 +43,15 @@ export default function SharePanel({ shareSession }) {
             selectedFiles={selectedFiles}
             disabled={false}
           />
+
+          {/* File list with Remove buttons — always visible after picking */}
+          {fileList.length > 0 && (
+            <SenderFileTable
+              fileList={fileList}
+              isActive={false}
+              onRemoveFile={removeFile}
+            />
+          )}
 
           {selectedFiles.length > 0 && (
             <>
@@ -53,12 +62,16 @@ export default function SharePanel({ shareSession }) {
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { value: 'open', label: 'Open', desc: 'Anyone can download', icon:
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                        d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/> },
-                    { value: 'pin',  label: 'PIN',  desc: 'Require a PIN code',  icon:
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/> },
+                    {
+                      value: 'open', label: 'Open', desc: 'Anyone can download',
+                      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                        d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/>
+                    },
+                    {
+                      value: 'pin',  label: 'PIN',  desc: 'Require a PIN code',
+                      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    },
                   ].map(({ value, label, desc, icon }) => (
                     <button
                       key={value}
@@ -85,7 +98,6 @@ export default function SharePanel({ shareSession }) {
                   ))}
                 </div>
 
-                {/* PIN input */}
                 {mode === 'pin' && (
                   <div className="space-y-1.5 pt-1">
                     <label className="block text-xs font-medium text-ink-muted uppercase tracking-wider">
@@ -101,14 +113,10 @@ export default function SharePanel({ shareSession }) {
                       className="input-field w-full"
                     />
                     {pinErr && <p className="text-xs text-status-error">{pinErr}</p>}
-                    <p className="text-xs text-ink-faint">
-                      Receivers must enter this code before downloading.
-                    </p>
                   </div>
                 )}
               </div>
 
-              {/* Announce button */}
               <button onClick={handleAnnounce} className="btn-primary w-full py-3.5">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -121,7 +129,7 @@ export default function SharePanel({ shareSession }) {
         </>
       )}
 
-      {/* Active share info bar */}
+      {/* ── ACTIVE / DONE: session info bar ──────────────────────────────── */}
       {(isActive || isDone) && (
         <div className={clsx(
           'card p-4 flex items-center justify-between gap-4',
@@ -129,10 +137,12 @@ export default function SharePanel({ shareSession }) {
         )}>
           <div className="space-y-0.5 min-w-0">
             <p className="text-sm font-semibold text-ink truncate">
-              {fileList.length} file{fileList.length !== 1 ? 's' : ''} · {formatBytes(totalSize)}
+              {fileList.length} file{fileList.length !== 1 ? 's' : ''}
             </p>
             <p className="text-xs text-ink-muted">
-              {isDone ? 'Session complete' : `${receivers.filter((r) => r.phase !== 'error').length} receiver${receivers.filter((r) => r.phase !== 'error').length !== 1 ? 's' : ''} connected`}
+              {isDone
+                ? 'Session complete'
+                : `${receivers.filter((r) => r.phase !== 'error').length} receiver${receivers.filter((r) => r.phase !== 'error').length !== 1 ? 's' : ''} connected`}
             </p>
           </div>
           <button onClick={closeSession} className="btn-secondary text-xs py-2 px-3 flex-shrink-0">
@@ -141,12 +151,22 @@ export default function SharePanel({ shareSession }) {
         </div>
       )}
 
-      {/* Session summary when done */}
+      {/* ── ACTIVE: file list with Cancel/Stop buttons ───────────────────── */}
+      {isActive && fileList.length > 0 && (
+        <SenderFileTable
+          fileList={fileList}
+          fileProgress={fileProgress}
+          isActive={true}
+          onSkipFile={skipFile}
+        />
+      )}
+
+      {/* ── DONE: session summary ────────────────────────────────────────── */}
       {isDone && receivers.length > 0 && (
         <SessionSummary receivers={receivers} totalSize={totalSize} fileList={fileList} />
       )}
 
-      {/* Live transfer log */}
+      {/* ── Live transfer log ─────────────────────────────────────────────── */}
       {(isActive || isDone) && (
         <TransferLog receivers={receivers} fileList={fileList} totalSize={totalSize} />
       )}

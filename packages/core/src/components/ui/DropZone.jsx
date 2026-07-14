@@ -101,10 +101,10 @@ export default function DropZone({ onFilesSelected, selectedFiles, disabled = fa
       >
 
             {/* Hidden inputs */}
-        <input ref={fileInputRef}   type="file" multiple  className="hidden"
+        <input ref={fileInputRef} style={{ display: 'none' }} type="file" multiple  
           onChange={(e) => { if (e.target.files?.length) onFilesSelected(e.target.files, 'files') }}
           disabled={disabled} />
-        <input ref={folderInputRef} type="file" className="hidden"
+        <input ref={folderInputRef} style={{ display: 'none' }} type="file" className="hidden"
           // @ts-ignore — non-standard but broadly supported
           webkitdirectory="true" mozdirectory="true" directory="true"
           onChange={(e) => { if (e.target.files?.length) onFilesSelected(e.target.files, 'folder') }}

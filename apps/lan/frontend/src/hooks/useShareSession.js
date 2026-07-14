@@ -1,43 +1,60 @@
-import { useState, useRef, useCallback } from 'react'
-import { getFilePath } from '@letshare/core/lib/utils'
-import { RTC_CONFIG, CHUNK_SIZE, BUFFER_LOW } from '@letshare/core/lib/webrtc'
-import { useSpeedTracker } from '@letshare/core/hooks/useSpeedTracker'
+
 
 /**
- * Manages the sharer side of a LAN session.
- * Accepts a socket from useLobby — does not create its own connection.
- *
- * Usage:
- *   const { announce, closeSession, receivers, ... } = useShareSession(getSocket)
+ * useShareSession — v2.2
+ * Adds skipFile() — same zero-overhead mechanism as Internet useSender.
+ * Uses 'lan' transfer profile (256 KB chunks / 4 MB buffer).
  */
+import { useState, useRef, useCallback } from 'react'
+import { getFilePath }          from '@letshare/core/lib/utils'
+import { RTC_CONFIG, getTransferProfile } from '@letshare/core/lib/webrtc'
+import { createTransferEngine } from '@letshare/core/lib/transferEngine'
+import { useThrottledProgress } from '@letshare/core/hooks/useThrottledProgress'
+import { useTelemetry }          from '@letshare/core/lib/useTelemetry'
+
+const PROFILE = getTransferProfile('lan')
+
+const makeFileList = (files) => files.map((f) => ({
+  path: getFilePath(f), name: f.name,
+  size: f.size, type: f.type || 'application/octet-stream',
+  status: 'pending',
+}))
+
 export function useShareSession(getSocket) {
-  const [sessionId,    setSessionId]    = useState(null)
-  const [phase,        setPhase]        = useState('idle')   // idle | active | done
-  const [receivers,    setReceivers]    = useState([])
-  const [fileList,     setFileList]     = useState([])
+  const [sessionId,     setSessionId]     = useState(null)
+  const [phase,         setPhase]         = useState('idle')
+  const [receivers,     setReceivers]     = useState([])
+  const [fileList,      setFileList]      = useState([])
   const [selectedFiles, setSelectedFiles] = useState([])
-  const [totalSize,    setTotalSize]    = useState(0)
+  const [totalSize,     setTotalSize]     = useState(0)
   const [selectionMode, setSelectionMode] = useState('files')
 
-  const peersRef   = useRef(new Map())  // Map<socketId, {pc, dc}>
-  const filesRef   = useRef([])
+  const peersRef      = useRef(new Map())
+  const filesRef      = useRef([])
   const speedTrackRef = useRef(new Map())
+  const { throttledUpdate, flushNow } = useThrottledProgress(100)
+  const telemetry = useTelemetry({ mode: 'lan', role: 'sender' })
 
-  // ── File selection ──────────────────────────────────────────────────────────
   const handleFilesSelected = useCallback((files, mode = 'files') => {
-    const arr  = Array.from(files)
-    const size = arr.reduce((s, f) => s + f.size, 0)
+    const arr = Array.from(files)
     filesRef.current = arr
     setSelectedFiles(arr)
-    setTotalSize(size)
+    setTotalSize(arr.reduce((s, f) => s + f.size, 0))
     setSelectionMode(mode)
-    setFileList(arr.map((f) => ({
-      path: getFilePath(f), name: f.name, size: f.size,
-      type: f.type || 'application/octet-stream',
-    })))
+    setFileList(makeFileList(arr))
   }, [])
 
-  // ── Announce share to lobby ─────────────────────────────────────────────────
+  // ── Remove a file before announcing (idle phase only) ───────────────────────
+  const removeFile = useCallback((fileIndex) => {
+    setSelectedFiles((prev) => {
+      const next = prev.filter((_, i) => i !== fileIndex)
+      filesRef.current = next
+      setTotalSize(next.reduce((s, f) => s + f.size, 0))
+      setFileList(makeFileList(next))
+      return next
+    })
+  }, [])
+
   const announce = useCallback(({ mode = 'open', pin = null, label } = {}) => {
     const socket = getSocket()
     if (!socket || !filesRef.current.length) return
@@ -46,25 +63,20 @@ export function useShareSession(getSocket) {
     const totalSz   = filesRef.current.reduce((s, f) => s + f.size, 0)
     const autoLabel = label || `${fileCount} file${fileCount !== 1 ? 's' : ''}`
 
+    telemetry.onSessionCreate()
     socket.emit('announce-share', { label: autoLabel, mode, pin, fileCount, totalSize: totalSz })
-
     socket.once('session-created', ({ sessionId: sid }) => {
-      setSessionId(sid)
-      setPhase('active')
+      setSessionId(sid); setPhase('active')
     })
-
-    // Listen for incoming receivers
     socket.on('peer-joined', ({ socketId, role, name }) => {
       if (role !== 'receiver') return
       addReceiver(socket, socketId, name || `Receiver ${peersRef.current.size + 1}`)
     })
-
     socket.on('peer-left', ({ socketId }) => {
       setReceivers((prev) => prev.map((r) =>
         r.socketId === socketId ? { ...r, phase: 'error', error: 'Disconnected' } : r
       ))
     })
-
     socket.on('signal', async ({ fromSocketId, payload }) => {
       const peer = peersRef.current.get(fromSocketId)
       if (!peer) return
@@ -75,7 +87,6 @@ export function useShareSession(getSocket) {
     })
   }, [getSocket])
 
-  // ── Add a receiver & open RTCPeerConnection ─────────────────────────────────
   function addReceiver(socket, socketId, name) {
     setReceivers((prev) => [...prev, {
       socketId, name, phase: 'connecting',
@@ -83,7 +94,6 @@ export function useShareSession(getSocket) {
       totalSent: 0, speedBps: 0, speedHistory: [],
       startedAt: null, finishedAt: null, error: null,
     }])
-
     speedTrackRef.current.set(socketId, { lastBytes: 0, lastTime: Date.now() })
 
     const pc = new RTCPeerConnection(RTC_CONFIG)
@@ -91,105 +101,99 @@ export function useShareSession(getSocket) {
       if (e.candidate)
         socket.emit('signal', { toSocketId: socketId, payload: { type: 'ice', candidate: e.candidate } })
     }
-
     const dc = pc.createDataChannel('file', { ordered: true })
     dc.binaryType = 'arraybuffer'
-    dc.onopen  = () => { patchReceiver(socketId, { phase: 'transferring', startedAt: Date.now() }); sendFilesToPeer(socketId, dc) }
+    dc.onopen  = () => { patchReceiver(socketId, { phase: 'transferring', startedAt: Date.now() }); runTransfer(socketId, dc) }
     dc.onclose = () => patchReceiver(socketId, { phase: 'error', error: 'Connection closed' })
     dc.onerror = () => patchReceiver(socketId, { phase: 'error', error: 'Connection error' })
 
-    peersRef.current.set(socketId, { pc, dc })
-
+    peersRef.current.set(socketId, { pc, dc, engine: null })
     pc.createOffer()
       .then((o) => pc.setLocalDescription(o))
-      .then(() => socket.emit('signal', {
-        toSocketId: socketId,
-        payload: { type: 'offer', sdp: pc.localDescription },
-      }))
+      .then(() => socket.emit('signal', { toSocketId: socketId, payload: { type: 'offer', sdp: pc.localDescription } }))
       .catch((e) => patchReceiver(socketId, { phase: 'error', error: e.message }))
   }
 
-  // ── Send files to one peer ──────────────────────────────────────────────────
-  async function sendFilesToPeer(socketId, dc) {
+  function runTransfer(socketId, dc) {
     const files       = filesRef.current
     const perFileSent = files.map(() => 0)
 
-    dc.send(JSON.stringify({
-      type: 'manifest', version: 2,
-      files: files.map((f) => ({ path: getFilePath(f), name: f.name, size: f.size, type: f.type || 'application/octet-stream' })),
-    }))
+    const engine = createTransferEngine(dc, files, PROFILE, {
+      getFileMeta: (f) => ({ path: getFilePath(f), name: f.name, size: f.size, type: f.type || 'application/octet-stream' }),
 
-    dc.bufferedAmountLowThreshold = BUFFER_LOW
+      onFileStart: (index) => {
+        setFileList((prev) => prev.map((f, i) => i === index ? { ...f, status: 'sending' } : f))
+      },
 
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i]
-      dc.send(JSON.stringify({ type: 'start', index: i }))
-      let offset = 0
-      while (offset < f.size) {
-        if (dc.readyState !== 'open') { patchReceiver(socketId, { phase: 'error', error: 'Channel closed' }); return }
-        const slice = await f.slice(offset, offset + CHUNK_SIZE).arrayBuffer()
-        dc.send(slice)
-        offset += slice.byteLength
-        perFileSent[i] = offset
-
+      onChunkSent: (index, offsetInFile, fileSize) => {
+        perFileSent[index] = offsetInFile
         const totalSent = perFileSent.reduce((s, x) => s + x, 0)
-        const fp        = f.size ? Math.floor((offset / f.size) * 100) : 100
-
-        const track   = speedTrackRef.current.get(socketId)
-        const now     = Date.now()
-        const elapsed = (now - track.lastTime) / 1000
+        const fp = fileSize ? Math.floor((offsetInFile / fileSize) * 100) : 100
+        const track = speedTrackRef.current.get(socketId)
+        const now = Date.now(); const elapsed = (now - track.lastTime) / 1000
+        let speedBps = null
         if (elapsed >= 0.25) {
-          const speedBps = Math.round((totalSent - track.lastBytes) / elapsed)
+          speedBps = Math.round((totalSent - track.lastBytes) / elapsed)
           track.lastBytes = totalSent; track.lastTime = now
-          setReceivers((prev) => prev.map((r) => {
-            if (r.socketId !== socketId) return r
-            const fp2 = [...r.fileProgress]; fp2[i] = fp
-            return { ...r, fileProgress: fp2, totalSent, speedBps, speedHistory: [...r.speedHistory, speedBps].slice(-20) }
-          }))
-        } else {
-          setReceivers((prev) => prev.map((r) => {
-            if (r.socketId !== socketId) return r
-            const fp2 = [...r.fileProgress]; fp2[i] = fp
-            return { ...r, fileProgress: fp2, totalSent }
-          }))
+          speedTrackRef.current.set(socketId, track)
         }
-        if (dc.bufferedAmount > BUFFER_LOW) await waitForBufferLow(dc)
-      }
-      dc.send(JSON.stringify({ type: 'end', index: i }))
-    }
+        telemetry.onChunk()
+        throttledUpdate(() => {
+          setReceivers((prev) => prev.map((r) => {
+            if (r.socketId !== socketId) return r
+            const fp2 = [...r.fileProgress]; fp2[index] = fp
+            const hist = speedBps !== null ? [...r.speedHistory, speedBps].slice(-20) : r.speedHistory
+            return { ...r, fileProgress: fp2, totalSent, speedBps: speedBps ?? r.speedBps, speedHistory: hist }
+          }))
+        })
+      },
 
-    dc.send(JSON.stringify({ type: 'all_done' }))
-    patchReceiver(socketId, { phase: 'done', speedBps: 0, finishedAt: Date.now() })
-    setReceivers((prev) => {
-      const allDone = prev.every((r) => r.socketId === socketId ? true : r.phase === 'done')
-      if (allDone) setPhase('done')
-      return prev
+      onFileEnd: (index) => {
+        flushNow()
+        setFileList((prev) => prev.map((f, i) => i === index ? { ...f, status: 'done' } : f))
+      },
+
+      onFileSkipped: (index) => {
+        perFileSent[index] = 0; flushNow()
+        setFileList((prev) => prev.map((f, i) => i === index ? { ...f, status: 'skipped' } : f))
+      },
+
+      onCancelled: () => patchReceiver(socketId, { phase: 'error', error: 'Cancelled.' }),
     })
+
+    const peer = peersRef.current.get(socketId)
+    if (peer) peer.engine = engine
+
+    engine.run()
+      .then(() => { engine.cleanup(); flushNow(); patchReceiver(socketId, { phase: 'done', speedBps: 0, finishedAt: Date.now() }) })
+      .catch((e) => { engine.cleanup(); if (!e.message.includes('cancelled')) patchReceiver(socketId, { phase: 'error', error: e.message }) })
   }
 
   function patchReceiver(socketId, partial) {
     setReceivers((prev) => prev.map((r) => r.socketId === socketId ? { ...r, ...partial } : r))
   }
 
-  function waitForBufferLow(dc) {
-    return new Promise((resolve) => {
-      const check = () => dc.bufferedAmount <= dc.bufferedAmountLowThreshold ? resolve() : setTimeout(check, 10)
-      check()
-    })
-  }
+  const skipFile = useCallback((fileIndex) => {
+    peersRef.current.forEach(({ engine }) => { engine?.skipFile(fileIndex) })
+    setFileList((prev) => prev.map((f, i) =>
+      i === fileIndex && f.status !== 'done' ? { ...f, status: 'skipped' } : f
+    ))
+  }, [])
 
-  // ── Close session ───────────────────────────────────────────────────────────
+  const cancelReceiver = useCallback((socketId) => {
+    const peer = peersRef.current.get(socketId)
+    if (peer?.engine) peer.engine.cancel()
+    patchReceiver(socketId, { phase: 'error', error: 'Cancelled by sender.' })
+  }, [])
+
   const closeSession = useCallback(() => {
     const socket = getSocket()
-    if (socket) {
-      socket.emit('close-share')
-      socket.off('peer-joined')
-      socket.off('peer-left')
-      socket.off('signal')
-    }
-    peersRef.current.forEach(({ pc, dc }) => { try { dc.close() } catch {} try { pc.close() } catch {} })
-    peersRef.current.clear()
-    speedTrackRef.current.clear()
+    if (socket) { socket.emit('close-share'); socket.off('peer-joined'); socket.off('peer-left'); socket.off('signal') }
+    peersRef.current.forEach(({ pc, dc, engine }) => {
+      engine?.cleanup(); engine?.cancel()
+      try { dc.close() } catch {} try { pc.close() } catch {}
+    })
+    peersRef.current.clear(); speedTrackRef.current.clear()
     setSessionId(null); setPhase('idle'); setReceivers([])
     setSelectedFiles([]); setFileList([]); setTotalSize(0)
     filesRef.current = []
@@ -197,6 +201,6 @@ export function useShareSession(getSocket) {
 
   return {
     phase, sessionId, receivers, fileList, selectedFiles, totalSize, selectionMode,
-    handleFilesSelected, announce, closeSession,
+    handleFilesSelected, removeFile, announce, skipFile, cancelReceiver, closeSession,
   }
 }
