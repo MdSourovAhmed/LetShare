@@ -1,44 +1,45 @@
+
+
 import React from 'react'
-import { formatBytes, formatSpeed, formatDuration } from '@letshare/core/lib/utils'
-import ReceiveStatsPanel  from '@letshare/core/components/ui/ReceiveStatusPanel'
-import ReceiverFileTable  from '@letshare/core/components/ui/ReceiverFileTable'
-import StatusBadge        from '@letshare/core/components/ui/StatusBadge'
+import ReceiveStatusPanel from '@letshare/core/components/ui/ReceiveStatusPanel'
+import ReceiverFileTable from '@letshare/core/components/ui/ReceiverFileTable'
+import StatusBadge       from '@letshare/core/components/ui/StatusBadge'
 
 function phaseToStatus(phase) {
-  if (phase === 'done')       return 'connected'
-  if (phase === 'error')      return 'error'
-  if (phase === 'receiving')  return 'connected'
+  if (phase === 'done')                          return 'connected'
+  if (phase === 'error')                         return 'error'
+  if (phase === 'receiving')                     return 'connected'
   if (phase === 'connecting' || phase === 'joining') return 'connecting'
   return 'idle'
 }
 
-/**
- * Shown to the receiver after they join a session.
- * Displays transfer stats, progress, and per-file download buttons.
- */
 export default function DownloadPanel({ joinSession: js, onReset }) {
   const {
     phase, statusText, error,
     fileRows, totalSize, totalReceived,
     speedBps, speedHistory, peakBps,
     startedAt, finishedAt,
+    skipFile,   // ← receiver-initiated file skip
   } = js
+  // console.log(totalSize);
+  // console.log(speedBps);
+  // console.log(peakBps);
+  // console.log(finishedAt-startedAt);
 
   const showStats = (phase === 'receiving' || phase === 'done') && totalSize > 0
 
   return (
     <div className="space-y-5">
 
-      {/* Status card */}
+      {/* Status + cancel session button */}
       <div className="card p-5 space-y-4">
         <div className="flex items-center justify-between">
           <StatusBadge type={phaseToStatus(phase)} label={statusText || 'Connecting…'} />
           <button onClick={onReset} className="btn-secondary text-xs py-1.5 px-3">
-            Cancel
+            {phase === 'receiving' ? 'Cancel transfer' : 'Close'}
           </button>
         </div>
 
-        {/* Error */}
         {phase === 'error' && error && (
           <div className="flex gap-3 p-3 rounded-xl bg-status-error/10 border border-status-error/20 text-status-error text-sm">
             <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -49,7 +50,15 @@ export default function DownloadPanel({ joinSession: js, onReset }) {
           </div>
         )}
 
-        {/* Connecting spinner */}
+        {phase === 'cancelled' && (
+          <div className="flex gap-3 p-3 rounded-xl bg-status-error/10 border border-status-error/20 text-status-error text-sm">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <span>{statusText}</span>
+          </div>
+        )}
+
         {(phase === 'joining' || phase === 'connecting') && (
           <div className="flex items-center gap-3 text-ink-muted py-2">
             <div className="relative w-8 h-8 flex-shrink-0">
@@ -61,9 +70,9 @@ export default function DownloadPanel({ joinSession: js, onReset }) {
         )}
       </div>
 
-      {/* Rich stats panel */}
+      {/* Stats */}
       {showStats && (
-        <ReceiveStatsPanel
+        <ReceiveStatusPanel
           totalSize={totalSize}
           totalReceived={totalReceived}
           speedBps={speedBps}
@@ -75,18 +84,23 @@ export default function DownloadPanel({ joinSession: js, onReset }) {
         />
       )}
 
-      {/* Success */}
+      {/* Done */}
       {phase === 'done' && (
         <div className="flex gap-3 p-4 rounded-xl bg-status-connected/10 border border-status-connected/20 text-status-connected text-sm animate-slide-up">
           <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
           </svg>
-          <span>All files received — click Save below to download each one.</span>
+          <span>All files received — click Save to download.</span>
         </div>
       )}
 
-      {/* File table */}
-      {fileRows.length > 0 && <ReceiverFileTable rows={fileRows} />}
+      {/* File table with skip buttons while receiving */}
+      {fileRows.length > 0 && (
+        <ReceiverFileTable
+          rows={fileRows}
+          onSkipFile={phase === 'receiving' ? skipFile : undefined}
+        />
+      )}
     </div>
   )
 }

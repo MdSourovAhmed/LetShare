@@ -21,6 +21,7 @@ export default defineConfig({
     }),
     tailwindcss(),
   ],
+ 
   server: {
     allowedHosts: ['letshare.home','letshare.local'],
     host: "0.0.0.0",

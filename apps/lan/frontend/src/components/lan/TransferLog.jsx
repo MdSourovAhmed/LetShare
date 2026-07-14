@@ -1,3 +1,6 @@
+
+
+
 import React from 'react'
 import clsx from 'clsx'
 import { formatBytes, formatSpeed, formatDuration } from '@letshare/core/lib/utils'
@@ -17,7 +20,7 @@ const phaseStyles = {
  * Shows the sharer a live log of every connected receiver with
  * per-receiver radial ring, sparkline, stat pills, and file progress.
  */
-export default function TransferLog({ receivers, fileList, totalSize }) {
+export default function TransferLog({ receivers, fileList, totalSize, onCancelReceiver }) {
   if (!receivers.length) return null
 
   return (
@@ -41,6 +44,9 @@ export default function TransferLog({ receivers, fileList, totalSize }) {
         const eta      = r.speedBps > 0 && totalSize > r.totalSent
           ? Math.ceil((totalSize - r.totalSent) / r.speedBps) : null
 
+
+        console.log("Logs: ",ps,pct,elapsedSec,avgSpeed,peakBps,eta);  
+
         return (
           <div key={r.socketId} className={clsx(
             'card overflow-hidden transition-all duration-300',
@@ -53,7 +59,20 @@ export default function TransferLog({ receivers, fileList, totalSize }) {
                 <span className={clsx('status-dot', ps.dot)} />
                 <span className="font-semibold text-sm text-ink">{r.name}</span>
               </div>
-              <span className={clsx('text-xs font-medium', ps.text)}>{ps.label}</span>
+              <div className="flex items-center gap-2">
+                <span className={clsx('text-xs font-medium', ps.text)}>{ps.label}</span>
+                {onCancelReceiver && (r.phase === 'connecting' || r.phase === 'transferring') && (
+                  <button
+                    onClick={() => onCancelReceiver(r.socketId)}
+                    className="w-6 h-6 flex items-center justify-center rounded-md text-ink-faint hover:text-status-error hover:bg-status-error/10 transition-all duration-150"
+                    title="Disconnect this receiver"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Transferring / done body */}
