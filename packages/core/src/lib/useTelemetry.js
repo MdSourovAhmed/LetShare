@@ -138,8 +138,8 @@ export function useTelemetry({ mode, role }) {
             bitrate = Math.round(report.availableOutgoingBitrate)
         }
         if (report.type === 'data-channel') {
-          if (report.bytesSent     != null) sctpSent = report.bytesSent
-          if (report.bytesReceived != null) sctpSent = report.bytesReceived
+          if (role === 'sender'   && report.bytesSent     != null) sctpSent = report.bytesSent
+          if (role === 'receiver' && report.bytesReceived != null) sctpSent = report.bytesReceived
         }
       })
       return { rttMs, availableBitrate: bitrate, sctpBytesSent: sctpSent }
