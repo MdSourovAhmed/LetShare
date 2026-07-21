@@ -1,50 +1,3 @@
-// // import { defineConfig } from 'vite'
-// // import react from '@vitejs/plugin-react'
-// // import tailwindcss from '@tailwindcss/vite'
-// // // https://vite.dev/config/
-// // export default defineConfig({
-// //   plugins: [react(),tailwindcss()],
-// // })
-
-
-
-
-
-// import { defineConfig } from "vite";
-// import react from "@vitejs/plugin-react";
-// import tailwindcss from "@tailwindcss/vite";
-
-// export default defineConfig({
-//   plugins: [
-//     react({
-//       jsxRuntime: "automatic", // ← eliminates the need for `import React` in every file
-//     }),
-//     tailwindcss(),
-//   ],
-//   server: {
-//     host: "0.0.0.0",
-//     port: 5173,
-//     proxy: {
-//       "/socket.io": {
-//         target: process.env.VITE_BACKEND_URL || "http://localhost:3001",
-//         ws: true,
-//         changeOrigin: true,
-//       },
-//     },
-//   },
-//   preview: {
-//     host: "0.0.0.0",
-//     port: 4173,
-//   },
-//   build: {
-//     outDir: "dist",
-//     sourcemap: false,
-//   },
-// });
-
-
-
-
 import { defineConfig, loadEnv } from 'vite'
 import react        from '@vitejs/plugin-react'
 import tailwindcss  from '@tailwindcss/vite'
@@ -71,6 +24,14 @@ export default defineConfig(({ mode }) => {
           ws:           true,   // proxy WebSocket upgrades (required for socket.io)
           changeOrigin: true,
         },
+        // Forward the metrics beacon (VITE_METRICS_ENDPOINT=/api/metrics) to the
+        // backend too — sendBeacon() resolves relative URLs against the page's
+        // own origin (Vite here), so without this proxy the POST silently hits
+        // Vite instead of the backend and writeMetrics() never runs.
+        '/api': {
+          target:       env.VITE_BACKEND_URL || 'http://localhost:3001',
+          changeOrigin: true,
+        },
       },
     },
 
@@ -79,16 +40,38 @@ export default defineConfig(({ mode }) => {
       port: 4173,
     },
 
+    // build: {
+    //   outDir:    'dist',
+    //   sourcemap: false,
+    //   // Split vendor chunks for better browser caching
+    //   rollupOptions: {
+    //     output: {
+    //       manualChunks: {
+    //         react:    ['react', 'react-dom'],
+    //         router:   ['react-router-dom'],
+    //         socketio: ['socket.io-client'],
+    //       },
+    //     },
+    //   },
+    // },
     build: {
       outDir:    'dist',
       sourcemap: false,
-      // Split vendor chunks for better browser caching
+      // Split vendor chunks for better browser caching using function syntax for Rolldown
       rollupOptions: {
         output: {
-          manualChunks: {
-            react:    ['react', 'react-dom'],
-            router:   ['react-router-dom'],
-            socketio: ['socket.io-client'],
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react-router-dom')) {
+                return 'router';
+              }
+              if (id.includes('react') || id.includes('react-dom')) {
+                return 'react';
+              }
+              if (id.includes('socket.io-client')) {
+                return 'socketio';
+              }
+            }
           },
         },
       },

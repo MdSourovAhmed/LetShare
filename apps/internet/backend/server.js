@@ -186,7 +186,8 @@ app.use(express.json({ limit: '64kb' }))
 app.get('/health', (_req, res) => res.json({ status: 'ok', mode: 'internet' }))
 
 // ── Metrics endpoint ──────────────────────────────────────────────────────────
-// Receives sendBeacon payloads from the browser (batched every 2s).
+// Receives exactly one sendBeacon payload per transfer, sent once the
+// transfer is done (success, cancel, or error) — never during it.
 // Writes to InfluxDB via metricsWriter. Never blocks — failures are swallowed.
 // The 204 response is sent before the InfluxDB write completes so the
 // browser's sendBeacon call is acknowledged immediately.

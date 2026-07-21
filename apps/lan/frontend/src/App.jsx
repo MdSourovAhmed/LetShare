@@ -32,14 +32,12 @@ import React         from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout        from './components/ui/Layout'
 import LobbyPage     from './pages/LobbyPage'
-import AnalyticsPage from './pages/AnalyticsPage'
 
 export default function App() {
   return (
     <Layout>
       <Routes>
         <Route path="/"          element={<LobbyPage />}     />
-        <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/*"         element={<LobbyPage />}     />
       </Routes>
     </Layout>

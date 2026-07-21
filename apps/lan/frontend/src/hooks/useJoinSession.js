@@ -33,7 +33,12 @@ export function useJoinSession(getSocket) {
   const curIdx         = useRef(-1)
   const metaRef        = useRef([])
   const totalRef       = useRef(0)
+  const fileStatusRef  = useRef([])
   const handshakeTimer = useRef(null)
+  // dc.onmessage is bound once (in buildPC), so it closes over whatever
+  // render's state existed at that moment — reading React state (speedHistory,
+  // totalReceived) from inside it would be stale. This ref is always current.
+  const speedTrackRef  = useRef({ lastBytes: 0, lastTime: Date.now(), history: [] })
 
   function clearHandshakeTimer() {
     if (handshakeTimer.current) { clearTimeout(handshakeTimer.current); handshakeTimer.current = null }
@@ -50,6 +55,7 @@ export function useJoinSession(getSocket) {
     handshakeTimer.current = setTimeout(() => {
       if (dcRef.current?.readyState === 'open') return
       setPhase('error'); setError('Connection timed out — sender may be offline.'); cleanup(socket)
+      finaliseTelemetry('error')
     }, HANDSHAKE_TIMEOUT_MS)
   }, [getSocket, resetSpeed])
 
@@ -84,10 +90,25 @@ export function useJoinSession(getSocket) {
       const dc = e.channel
       dcRef.current = dc
       dc.binaryType = 'arraybuffer'
-      dc.onopen = () => { clearHandshakeTimer(); setPhase('receiving'); setStatusText('Receiving files…'); setStartedAt(Date.now()) }
+      dc.onopen = () => { clearHandshakeTimer(); telemetry.onChannelOpen(pc); setPhase('receiving'); setStatusText('Receiving files…'); setStartedAt(Date.now()) }
       dc.onmessage = onData
-      dc.onclose = () => { setPhase((p) => { if (p === 'done' || p === 'cancelled') return p; setError('Connection lost.'); return 'error' }) }
+      dc.onclose = () => { setPhase((p) => { if (p === 'done' || p === 'cancelled') return p; setError('Connection lost.'); finaliseTelemetry('error'); return 'error' }) }
     }
+  }
+
+  function finaliseTelemetry(outcome) {
+    const totalBytes = fileRecv.current.reduce((s, x) => s + x, 0)
+    const history     = speedTrackRef.current.history
+    telemetry.finalise({
+      totalBytes,
+      peakSpeedBps: history.length ? Math.max(...history) : 0,
+      speedSamples: history,
+      fileList: metaRef.current.map((f, i) => ({
+        path: f.path || f.name, size: f.size,
+        status: fileStatusRef.current[i] || 'pending',
+      })),
+      outcome,
+    })
   }
 
   function onData(e) {
@@ -99,12 +120,15 @@ export function useJoinSession(getSocket) {
           const meta = msg.files || []
           metaRef.current = meta; totalRef.current = meta.reduce((s, f) => s + (f.size || 0), 0)
           buffers.current = meta.map(() => []); fileRecv.current = meta.map(() => 0); curIdx.current = -1
+          fileStatusRef.current = meta.map(() => 'pending')
           setTotalSize(totalRef.current)
           setFileRows(meta.map((f) => ({ path: f.path || f.name, name: f.name, size: f.size, type: f.type, progress: 0, url: null, status: 'pending' })))
           return
         }
         if (msg?.type === 'start') {
           curIdx.current = msg.index
+          fileStatusRef.current[msg.index] = 'receiving'
+          telemetry.onFileStart(msg.index, metaRef.current[msg.index]?.size ?? 0)
           setFileRows((prev) => prev.map((r, i) => i === msg.index ? { ...r, status: 'receiving' } : r))
           return
         }
@@ -113,6 +137,8 @@ export function useJoinSession(getSocket) {
           const blob = new Blob(buffers.current[i], { type: metaRef.current[i]?.type || 'application/octet-stream' })
           const url = URL.createObjectURL(blob)
           buffers.current[i] = []
+          fileStatusRef.current[i] = 'done'
+          telemetry.onFileEnd(i)
           flushNow()
           setFileRows((prev) => prev.map((r, idx) => idx === i ? { ...r, progress: 100, url, status: 'done' } : r))
           return
@@ -120,18 +146,36 @@ export function useJoinSession(getSocket) {
         if (msg?.type === 'file_skipped') {
           const i = msg.index
           buffers.current[i] = []; fileRecv.current[i] = 0
+          fileStatusRef.current[i] = 'skipped'
           flushNow()
           setFileRows((prev) => prev.map((r, idx) => idx === i ? { ...r, progress: 0, url: null, status: 'skipped' } : r))
           return
         }
-        if (msg?.type === 'all_done') { flushNow(); setPhase('done'); setStatusText('All files received!'); setFinishedAt(Date.now()); return }
-        if (msg?.type === 'cancelled') { flushNow(); setPhase('cancelled'); setStatusText('Sender cancelled the transfer.'); return }
+        if (msg?.type === 'all_done') {
+          flushNow(); setPhase('done'); setStatusText('All files received!'); setFinishedAt(Date.now())
+          finaliseTelemetry('done')
+          return
+        }
+        if (msg?.type === 'cancelled') {
+          flushNow(); setPhase('cancelled'); setStatusText('Sender cancelled the transfer.')
+          finaliseTelemetry('cancelled')
+          return
+        }
       } catch {}
     }
     const ab = data instanceof ArrayBuffer ? data : null
     if (!ab || curIdx.current < 0) return
     const i = curIdx.current
     buffers.current[i].push(new Uint8Array(ab)); fileRecv.current[i] += ab.byteLength; onBytes(ab.byteLength)
+    telemetry.onChunk()
+    const track = speedTrackRef.current
+    const now = Date.now(); const elapsed = (now - track.lastTime) / 1000
+    if (elapsed >= 0.25) {
+      const totalNow = fileRecv.current.reduce((s, x) => s + x, 0)
+      const speed = Math.round((totalNow - track.lastBytes) / elapsed)
+      track.lastBytes = totalNow; track.lastTime = now
+      track.history = [...track.history, speed].slice(-100)
+    }
     const size = metaRef.current[i]?.size || 0
     const progress = size ? Math.floor((fileRecv.current[i] / size) * 100) : 0
     const received = fileRecv.current.reduce((s, x) => s + x, 0)
@@ -144,6 +188,7 @@ export function useJoinSession(getSocket) {
       try { dc.send(JSON.stringify({ type: 'receiver_skip', index: fileIndex })) } catch {}
     }
     buffers.current[fileIndex] = []; fileRecv.current[fileIndex] = 0
+    fileStatusRef.current[fileIndex] = 'skipped'
     setFileRows((prev) => prev.map((r, i) => i === fileIndex ? { ...r, progress: 0, url: null, status: 'skipped' } : r))
   }, [])
 
@@ -157,6 +202,7 @@ export function useJoinSession(getSocket) {
     buffers.current.forEach((_, i) => { buffers.current[i] = [] })
     setFileRows((prev) => prev.map((r) => { if (r.url) URL.revokeObjectURL(r.url); return { ...r, url: null } }))
     setPhase('cancelled'); setStatusText('Transfer cancelled.')
+    finaliseTelemetry('cancelled')
     cleanup(getSocket())
   }, [getSocket])
 
@@ -164,6 +210,7 @@ export function useJoinSession(getSocket) {
     cleanup(getSocket())
     pcRef.current = null; dcRef.current = null
     buffers.current = []; fileRecv.current = []; metaRef.current = []
+    fileStatusRef.current = []; speedTrackRef.current = { lastBytes: 0, lastTime: Date.now(), history: [] }
     curIdx.current = -1; totalRef.current = 0
     resetSpeed()
     setPhase('idle'); setStatusText(''); setFileRows([])

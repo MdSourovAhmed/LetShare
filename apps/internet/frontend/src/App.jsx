@@ -27,7 +27,6 @@ import Layout        from './components/ui/Layout'
 import HomePage      from './pages/HomePage'
 import SendPage      from './pages/SendPage'
 import ReceivePage   from './pages/ReceivePage'
-import AnalyticsPage from './pages/AnalyticsPage'
 
 export default function App() {
   return (
@@ -36,7 +35,6 @@ export default function App() {
         <Route path="/"          element={<HomePage />}      />
         <Route path="/send"      element={<SendPage />}      />
         <Route path="/receive"   element={<ReceivePage />}   />
-        <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="*"          element={<HomePage />}      />
       </Routes>
     </Layout>

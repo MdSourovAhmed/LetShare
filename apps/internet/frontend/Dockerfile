@@ -33,9 +33,26 @@ COPY apps/internet/frontend ./apps/internet/frontend
 
 # VITE_BACKEND_URL is a build-time variable — it gets embedded in the JS bundle.
 # The browser uses this URL to connect its socket to the backend.
-# Example: --build-arg VITE_BACKEND_URL=https://share.yourdomain.com
+#
+# In production, leave this EMPTY (the default) so socket.io-client connects
+# same-origin — nginx (this container) proxies /socket.io/ and /api/ to the
+# backend internally (see nginx.conf). This also avoids a mixed-content
+# error: once the page is served over HTTPS, a separate absolute
+# http://backend-host URL would be blocked by the browser outright.
+# Only set this to an absolute URL if the backend is deliberately served
+# from a different origin than the frontend.
 ARG VITE_BACKEND_URL=""
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
+
+# Same mechanism for the TURN server (see apps/internet/frontend/src/lib/rtcConfig.js).
+# Without these, rtcConfig.js falls back to STUN-only and logs a warning in
+# every production build — set all three or none, not a partial set.
+ARG VITE_TURN_URL=""
+ARG VITE_TURN_USERNAME=""
+ARG VITE_TURN_CREDENTIAL=""
+ENV VITE_TURN_URL=$VITE_TURN_URL
+ENV VITE_TURN_USERNAME=$VITE_TURN_USERNAME
+ENV VITE_TURN_CREDENTIAL=$VITE_TURN_CREDENTIAL
 
 RUN npm run build -w apps/internet/frontend
 

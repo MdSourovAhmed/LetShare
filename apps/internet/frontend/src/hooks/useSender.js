@@ -1,8 +1,13 @@
 
 
 /**
- * useSender — v2.3
- * Adds telemetry collection via useTelemetry.
+ * useSender — v2.4
+ * Telemetry fix: this hook fans out to multiple concurrent receivers
+ * (peersRef Map, one per link visitor), so it can't use the useTelemetry()
+ * hook — that holds one shared tracker for the whole hook instance, which
+ * corrupts connection time, chunk counts, and per-file timings across
+ * receivers, and only ever sends metrics for the first receiver to finish.
+ * Each receiver now gets its own createTelemetryTracker() instance instead.
  * All telemetry hooks fire OUTSIDE the hot chunk loop — zero throughput impact.
  */
 import { useState, useRef, useCallback } from 'react'
@@ -12,7 +17,7 @@ import { getTransferProfile }    from '@letshare/core/lib/webrtc'
 import { RTC_CONFIG }            from '../lib/rtcConfig'
 import { createTransferEngine }  from '@letshare/core/lib/transferEngine'
 import { useThrottledProgress }  from '@letshare/core/hooks/useThrottledProgress'
-import { useTelemetry }          from '@letshare/core/lib/useTelemetry'
+import { createTelemetryTracker } from '@letshare/core/lib/telemetryTracker'
 
 const PROFILE = getTransferProfile('internet')
 
@@ -45,7 +50,6 @@ export function useSender() {
   const speedTrackRef = useRef(new Map())
 
   const { throttledUpdate, flushNow } = useThrottledProgress(100)
-  const telemetry = useTelemetry({ mode: 'internet', role: 'sender' })
 
   const patch = useCallback(
     (partial) => setState((s) => ({ ...s, ...partial })),
@@ -76,8 +80,6 @@ export function useSender() {
   const createSession = useCallback(() => {
     if (!selectedFiles.length) return
 
-    telemetry.onSessionCreate()
-
     const linkId    = generateId()
     const shareLink = `${window.location.origin}/receive?id=${linkId}`
     patch({ phase: 'waiting', linkId, shareLink, statusText: 'Waiting for receivers…', receivers: [] })
@@ -103,7 +105,7 @@ export function useSender() {
     })
 
     socket.emit('join', { linkId, role: 'sender' })
-  }, [selectedFiles, patch, telemetry])
+  }, [selectedFiles, patch])
 
   // ── Add one receiver ───────────────────────────────────────────────────────
   function addReceiver(socket, linkId, socketId) {
@@ -124,6 +126,11 @@ export function useSender() {
 
     speedTrackRef.current.set(socketId, { lastBytes: 0, lastTime: Date.now(), history: [] })
 
+    // One tracker per receiver — not shared, so concurrent receivers'
+    // connection times, chunk counts, and per-file timings never mix.
+    const telemetry = createTelemetryTracker({ mode: 'internet', role: 'sender' })
+    telemetry.onSessionCreate()
+
     const pc = new RTCPeerConnection(RTC_CONFIG)
     pc.onicecandidate = (e) => {
       if (e.candidate)
@@ -141,7 +148,7 @@ export function useSender() {
     dc.onclose = () => patchReceiver(socketId, { phase: 'error', error: 'Connection closed' })
     dc.onerror = () => patchReceiver(socketId, { phase: 'error', error: 'Connection error' })
 
-    peersRef.current.set(socketId, { pc, dc, engine: null })
+    peersRef.current.set(socketId, { pc, dc, engine: null, telemetry })
 
     pc.createOffer()
       .then((o) => pc.setLocalDescription(o))
@@ -154,6 +161,7 @@ export function useSender() {
   function runTransfer(socketId, dc) {
     const files       = filesRef.current
     const perFileSent = files.map(() => 0)
+    const telemetry   = peersRef.current.get(socketId)?.telemetry
 
     const engine = createTransferEngine(dc, files, PROFILE, {
       getFileMeta: (f) => ({
@@ -162,11 +170,11 @@ export function useSender() {
       }),
 
       // ── Telemetry hooks (outside hot path) ──────────────────────────────
-      onPauseStart: telemetry.onPauseStart,
-      onPauseEnd:   telemetry.onPauseEnd,
+      onPauseStart: telemetry?.onPauseStart,
+      onPauseEnd:   telemetry?.onPauseEnd,
 
       onFileStart: (index) => {
-        telemetry.onFileStart(index, files[index]?.size ?? 0)
+        telemetry?.onFileStart(index, files[index]?.size ?? 0)
         setState((s) => ({
           ...s,
           fileList: s.fileList.map((f, i) => i === index ? { ...f, status: 'sending' } : f),
@@ -175,7 +183,7 @@ export function useSender() {
 
       // ── Hot path ─────────────────────────────────────────────────────────
       onChunkSent: (index, offsetInFile, fileSize) => {
-        telemetry.onChunk()   // just increments a ref counter — nanoseconds
+        telemetry?.onChunk()   // just increments a ref counter — nanoseconds
 
         perFileSent[index] = offsetInFile
         const totalSent = perFileSent.reduce((s, x) => s + x, 0)
@@ -208,7 +216,7 @@ export function useSender() {
       // ── End hot path ─────────────────────────────────────────────────────
 
       onFileEnd: (index) => {
-        telemetry.onFileEnd(index)
+        telemetry?.onFileEnd(index)
         flushNow()
         setState((s) => ({
           ...s,
@@ -237,13 +245,15 @@ export function useSender() {
         patchReceiver(socketId, { phase: 'done', speedBps: 0, finishedAt: Date.now() })
 
         // ── Telemetry finalise — runs AFTER transfer completes ──────────────
+        // Uses `files`/`perFileSent` (local, always current) rather than the
+        // `state` closure, which is stale by the time this async callback runs.
         const track     = speedTrackRef.current.get(socketId)
         const totalSent = perFileSent.reduce((s, x) => s + x, 0)
-        await telemetry.finalise({
+        await telemetry?.finalise({
           totalBytes:   totalSent,
           peakSpeedBps: track?.history?.length ? Math.max(...track.history) : 0,
           speedSamples: track?.history || [],
-          fileList:     state.fileList,
+          fileList:     files.map((f) => ({ path: getFilePath(f), size: f.size, status: 'done' })),
           outcome:      'done',
         })
 
@@ -253,10 +263,21 @@ export function useSender() {
           return allDone ? { ...s, phase: 'done', statusText: 'All receivers done!' } : s
         })
       })
-      .catch((e) => {
+      .catch(async (e) => {
         engine.cleanup()
-        if (!e.message.includes('cancelled'))
+        const cancelled = e.message.includes('cancelled')
+        if (!cancelled)
           patchReceiver(socketId, { phase: 'error', error: e.message })
+
+        const track     = speedTrackRef.current.get(socketId)
+        const totalSent = perFileSent.reduce((s, x) => s + x, 0)
+        await telemetry?.finalise({
+          totalBytes:   totalSent,
+          peakSpeedBps: track?.history?.length ? Math.max(...track.history) : 0,
+          speedSamples: track?.history || [],
+          fileList:     files.map((f) => ({ path: getFilePath(f), size: f.size, status: 'done' })),
+          outcome:      cancelled ? 'cancelled' : 'error',
+        })
       })
   }
 

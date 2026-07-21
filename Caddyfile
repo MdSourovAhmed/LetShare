@@ -1,0 +1,9 @@
+# Caddyfile — Caddy provisions and renews the Let's Encrypt certificate for
+# {$DOMAIN} automatically; no certbot, no manual renewal cron job needed.
+# nginx (inside internet-frontend-prod) still handles /api/ and /socket.io/
+# proxying to the backend — Caddy's only job is TLS termination and getting
+# traffic to that one container.
+
+{$DOMAIN} {
+	reverse_proxy internet-frontend-prod:80
+}

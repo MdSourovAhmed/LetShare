@@ -16,9 +16,13 @@ FROM node:22-alpine
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY packages/core/package.json ./packages/core/package.json
 COPY apps/lan/backend/package.json ./apps/lan/backend/package.json
 RUN npm install --omit=dev
 
+# Same fix as the internet backend — server.js imports metricsWriter.js via
+# a relative path into packages/core, which npm install alone won't copy.
+COPY packages/core ./packages/core
 COPY apps/lan/backend/server.js ./apps/lan/backend/server.js
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

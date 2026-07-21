@@ -130,7 +130,6 @@ export default function Layout({ children }) {
   const navLinks = [
     ['Send',      '/send'      ],
     ['Receive',   '/receive'   ],
-    ['Analytics', '/analytics' ],
   ]
 
   return (

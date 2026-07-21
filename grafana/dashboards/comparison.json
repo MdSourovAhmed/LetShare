@@ -1,0 +1,207 @@
+{
+  "uid": "letshare-comparison",
+  "title": "LetShare \u2014 LAN vs Internet Comparison",
+  "description": "The one intentional exception to LetShare's per-app dashboard isolation. Uses a Mixed datasource so each panel queries both influxdb-lan and influxdb-internet directly \u2014 the underlying buckets are never merged, only compared visually here.",
+  "tags": [
+    "letshare",
+    "comparison"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "bargauge",
+      "title": "Throughput \u2014 Avg / Median / P95",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "targets": [
+        {
+          "query": "avg  = from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> mean() |> set(key: \"metric\", value: \"avg\")\n\nmed  = from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> median() |> set(key: \"metric\", value: \"median\")\n\np95  = from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> quantile(q: 0.95) |> set(key: \"metric\", value: \"p95\")\n\nunion(tables: [avg, med, p95]) |> set(key: \"app\", value: \"LAN\")",
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-lan"
+          }
+        },
+        {
+          "query": "avg  = from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> mean() |> set(key: \"metric\", value: \"avg\")\n\nmed  = from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> median() |> set(key: \"metric\", value: \"median\")\n\np95  = from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> quantile(q: 0.95) |> set(key: \"metric\", value: \"p95\")\n\nunion(tables: [avg, med, p95]) |> set(key: \"app\", value: \"Internet\")",
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-internet"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "Avg Connection Setup Time (NAT traversal cost)",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"connectionMs\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> mean()\n  |> set(key: \"app\", value: \"LAN\")",
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-lan"
+          }
+        },
+        {
+          "query": "from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"connectionMs\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> mean()\n  |> set(key: \"app\", value: \"Internet\")",
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-internet"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "bargauge",
+      "title": "Successful vs Failed Transfers",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "targets": [
+        {
+          "query": "success = from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"totalBytes\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> count() |> set(key: \"status\", value: \"successful\")\n\nfailed  = from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"totalBytes\")\n  |> filter(fn: (r) => r.outcome != \"done\")\n  |> count() |> set(key: \"status\", value: \"failed\")\n\nunion(tables: [success, failed]) |> set(key: \"app\", value: \"LAN\")",
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-lan"
+          }
+        },
+        {
+          "query": "success = from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"totalBytes\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> count() |> set(key: \"status\", value: \"successful\")\n\nfailed  = from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"totalBytes\")\n  |> filter(fn: (r) => r.outcome != \"done\")\n  |> count() |> set(key: \"status\", value: \"failed\")\n\nunion(tables: [success, failed]) |> set(key: \"app\", value: \"Internet\")",
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-internet"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "histogram",
+      "title": "Throughput Distribution",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"lan_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> set(key: \"app\", value: \"LAN\")",
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-lan"
+          }
+        },
+        {
+          "query": "from(bucket: \"internet_transfers\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"transfer_summary\" and r._field == \"avgSpeedBps\")\n  |> filter(fn: (r) => r.outcome == \"done\")\n  |> set(key: \"app\", value: \"Internet\")",
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-internet"
+          }
+        }
+      ]
+    }
+  ]
+}
