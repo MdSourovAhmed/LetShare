@@ -24,15 +24,15 @@ export default defineConfig(({ mode }) => {
       port: 5174,
       proxy: {
         "/socket.io": {
-          target: env.VITE_BACKEND_URL || "http://localhost:3002",
-          ws: true,
+          target:       env.VITE_BACKEND_URL || "http://localhost:3002",
+          ws:           true,
           changeOrigin: true,
         },
         // Forward the metrics beacon (VITE_METRICS_ENDPOINT=/api/metrics) to the
         // backend too — otherwise sendBeacon() posts to Vite's own origin and
         // writeMetrics() on the backend never runs.
         "/api": {
-          target: env.VITE_BACKEND_URL || "http://localhost:3002",
+          target:       env.VITE_BACKEND_URL || "http://localhost:3002",
           changeOrigin: true,
         },
       },
@@ -41,32 +41,9 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 4173,
     },
-    // build: {
-    //   outDir: "dist",
-    //   sourcemap: false,
-    // },
-
     build: {
-      outDir: 'dist',
+      outDir: "dist",
       sourcemap: false,
-      // Split vendor chunks for better browser caching using function syntax for Rolldown
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (id.includes('node_modules')) {
-              if (id.includes('react-router-dom')) {
-                return 'router';
-              }
-              if (id.includes('react') || id.includes('react-dom')) {
-                return 'react';
-              }
-              if (id.includes('socket.io-client')) {
-                return 'socketio';
-              }
-            }
-          },
-        },
-      },
     },
   };
 });
