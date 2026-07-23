@@ -18,6 +18,8 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/letshare-internet-backend
   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/letshare-internet-frontend
+  # BACKEND_IMAGE:  ghcr.io/mdsourovahmed/letshare-internet-backend
+  # FRONTEND_IMAGE: ghcr.io/mdsourovahmed/letshare-internet-frontend
 
 jobs:
   build-and-push:
@@ -72,6 +74,8 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: SSH into VPS and redeploy
         uses: appleboy/ssh-action@v1.0.3
