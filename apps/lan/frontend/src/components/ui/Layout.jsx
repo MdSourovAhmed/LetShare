@@ -31,15 +31,6 @@ export default function Layout({ children }) {
                 }`}>
               Lobby
             </NavLink>
-            <NavLink to="/analytics"
-              className={({ isActive }) =>
-                `px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                  isActive
-                    ? 'bg-brand-500/15 text-brand-400'
-                    : 'text-ink-muted hover:text-ink hover:bg-surface-muted'
-                }`}>
-              Analytics
-            </NavLink>
           </nav>
 
           <div className="flex items-center gap-2 text-xs text-ink-faint">

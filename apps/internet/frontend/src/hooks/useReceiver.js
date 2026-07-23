@@ -81,6 +81,7 @@ export function useReceiver(linkId) {
     handshakeTimer.current = setTimeout(() => {
       if (dcRef.current?.readyState === 'open') return
       patch({ phase: 'error', statusText: 'Timeout — sender may be offline.' })
+      finaliseTelemetry('error')
     }, HANDSHAKE_TIMEOUT_MS)
 
     return () => {
@@ -112,9 +113,33 @@ export function useReceiver(linkId) {
       }
       dc.onmessage = onData
       dc.onclose = () =>
-        setState((s) => s.phase === 'done' || s.phase === 'cancelled' ? s
-          : { ...s, phase: 'error', statusText: 'Connection lost.' })
+        setState((s) => {
+          if (s.phase === 'done' || s.phase === 'cancelled') return s
+          telemetry.finalise({
+            totalBytes:   s.totalReceived,
+            peakSpeedBps: peakBps,
+            speedSamples: speedHistory,
+            fileList:     s.fileRows.map((r) => ({ path: r.path, size: r.size, status: r.status || 'done' })),
+            outcome:      'error',
+          })
+          return { ...s, phase: 'error', statusText: 'Connection lost.' }
+        })
     }
+  }
+
+  function finaliseTelemetry(outcome) {
+    setState((s) => {
+      telemetry.finalise({
+        totalBytes:   s.totalReceived,
+        peakSpeedBps: peakBps,
+        speedSamples: speedHistory,
+        fileList:     s.fileRows.map((r) => ({
+          path: r.path, size: r.size, status: r.status || 'done',
+        })),
+        outcome,
+      })
+      return s
+    })
   }
 
   function onData(e) {
@@ -178,24 +203,13 @@ export function useReceiver(linkId) {
           flushNow()
           const end = Date.now()
           patch({ phase: 'done', statusText: 'All files received!', finishedAt: end })
-          // Finalise telemetry after completion
-          setState((s) => {
-            telemetry.finalise({
-              totalBytes:   s.totalReceived,
-              peakSpeedBps: peakBps,
-              speedSamples: speedHistory,
-              fileList:     s.fileRows.map((r) => ({
-                path: r.path, size: r.size, status: r.status || 'done',
-              })),
-              outcome: 'done',
-            })
-            return s
-          })
+          finaliseTelemetry('done')
           return
         }
         if (msg?.type === 'cancelled') {
           flushNow()
           patch({ phase: 'cancelled', statusText: 'Sender cancelled the transfer.' })
+          finaliseTelemetry('cancelled')
           return
         }
       } catch {}

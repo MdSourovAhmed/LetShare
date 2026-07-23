@@ -35,10 +35,16 @@ services:
       - "3001:3001"
     volumes:
       - ./apps/internet/backend:/app/apps/internet/backend  # live reload
+      - ./packages/core:/app/packages/core                  # shared core — server.js imports metricsWriter.js from here
       - internet_backend_modules:/app/node_modules          # container's node_modules
     environment:
       PORT: 3001
       CORS_ORIGIN: "*"
+      INFLUX_URL: "${INFLUX_URL:-http://influxdb:8086}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:-}"
+      INFLUX_ORG: "${INFLUX_ORG:-letshare}"
+      INFLUX_BUCKET: "internet_transfers"
+      METRICS_LOG_FILE: "./logs/internet-transfers.jsonl"
     networks: [letshare-net]
     restart: unless-stopped
 
@@ -69,9 +75,19 @@ services:
       dockerfile: apps/internet/backend/Dockerfile
     ports:
       - "3001:3001"
+    volumes:
+      # Only the logs dir — unlike backend-dev, prod doesn't bind-mount the
+      # whole source tree, so this needs its own mount or the JSONL log
+      # would only exist inside the ephemeral container.
+      - ./apps/internet/backend/logs:/app/apps/internet/backend/logs
     environment:
       PORT: 3001
       CORS_ORIGIN: "${INTERNET_CORS_ORIGIN:-*}"
+      INFLUX_URL: "${INFLUX_URL:-http://influxdb:8086}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:-}"
+      INFLUX_ORG: "${INFLUX_ORG:-letshare}"
+      INFLUX_BUCKET: "internet_transfers"
+      METRICS_LOG_FILE: "./logs/internet-transfers.jsonl"
     networks: [letshare-net]
     restart: unless-stopped
     healthcheck:
@@ -111,9 +127,15 @@ services:
       - "3002:3002"
     volumes:
       - ./apps/lan/backend:/app/apps/lan/backend
+      - ./packages/core:/app/packages/core   # shared core — server.js imports metricsWriter.js from here
       - lan_backend_modules:/app/node_modules
     environment:
       PORT: 3002
+      INFLUX_URL: "${INFLUX_URL:-http://influxdb:8086}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:-}"
+      INFLUX_ORG: "${INFLUX_ORG:-letshare}"
+      INFLUX_BUCKET: "lan_transfers"
+      METRICS_LOG_FILE: "./logs/lan-transfers.jsonl"
     # network_mode: host    # ← Uncomment on Linux for real mDNS (letshare.local)
     #                         # On macOS/Windows, run the backend natively instead.
     networks: [letshare-net]
@@ -144,8 +166,15 @@ services:
       dockerfile: apps/lan/backend/Dockerfile
     ports:
       - "3002:3002"
+    volumes:
+      - ./apps/lan/backend/logs:/app/apps/lan/backend/logs
     environment:
       PORT: 3002
+      INFLUX_URL: "${INFLUX_URL:-http://influxdb:8086}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:-}"
+      INFLUX_ORG: "${INFLUX_ORG:-letshare}"
+      INFLUX_BUCKET: "lan_transfers"
+      METRICS_LOG_FILE: "./logs/lan-transfers.jsonl"
     # network_mode: host    # ← Uncomment on Linux for mDNS
     networks: [letshare-net]
     restart: unless-stopped
@@ -169,6 +198,72 @@ services:
     networks: [letshare-net]
     restart: unless-stopped
 
+# ── Observability stack — opt-in via `docker compose --profile observability up` ──
+# Entirely separate from the app profiles above. Both backends already write
+# to InfluxDB when INFLUX_TOKEN is set (see each service's environment block);
+# this just gives you somewhere for those writes to land, plus Grafana to
+# view them. Two buckets, two datasources, two dashboards — internet and lan
+# never share a query.
+
+  influxdb:
+    profiles: [observability]
+    image: influxdb:2
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE:          setup
+      DOCKER_INFLUXDB_INIT_USERNAME:      admin
+      DOCKER_INFLUXDB_INIT_PASSWORD:      ${INFLUX_ADMIN_PASSWORD:-letshare-admin}
+      DOCKER_INFLUXDB_INIT_ORG:           ${INFLUX_ORG:-letshare}
+      DOCKER_INFLUXDB_INIT_BUCKET:        internet_transfers   # 2nd bucket created below
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN:   ${INFLUX_TOKEN}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks: [letshare-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: influxdb's own init only creates ONE bucket at first boot, so
+  # this creates lan_transfers, then exits. Safe to re-run (errors if the
+  # bucket already exists, which is fine — the container just exits non-zero
+  # and compose moves on).
+  influxdb-init:
+    profiles: [observability]
+    image: influxdb:2
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    networks: [letshare-net]
+    entrypoint: >
+      sh -c "influx bucket create --name lan_transfers
+      --org ${INFLUX_ORG:-letshare} --token ${INFLUX_TOKEN}
+      --host http://influxdb:8086 || true"
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-letshare-admin}
+      GF_AUTH_ANONYMOUS_ENABLED:  "false"
+      INFLUX_URL:                 http://influxdb:8086
+      INFLUX_ORG:                 ${INFLUX_ORG:-letshare}
+      INFLUX_TOKEN:                ${INFLUX_TOKEN}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      influxdb-init:
+        condition: service_completed_successfully
+    networks: [letshare-net]
+    restart: unless-stopped
+
 # ── Named volumes (node_modules stay inside containers) ──────────────────────
 # These prevent the host's node_modules (or absence of them) from leaking
 # into the container. Each container manages its own dependency tree.
@@ -177,6 +272,8 @@ volumes:
   internet_frontend_modules:
   lan_backend_modules:
   lan_frontend_modules:
+  influxdb_data:
+  grafana_data:
 
 networks:
   letshare-net:

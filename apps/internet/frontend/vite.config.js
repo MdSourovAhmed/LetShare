@@ -46,8 +46,8 @@
 
 
 import { defineConfig, loadEnv } from 'vite'
-import react        from '@vitejs/plugin-react'
-import tailwindcss  from '@tailwindcss/vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 // loadEnv lets us read .env variables inside vite.config.js itself
 // (process.env is not populated by Vite in config files by default)
@@ -67,8 +67,16 @@ export default defineConfig(({ mode }) => {
         // In dev, forward all /socket.io requests to the backend.
         // The browser talks to Vite, Vite proxies to the backend — no CORS issues.
         '/socket.io': {
-          target:       env.VITE_BACKEND_URL || 'http://localhost:3001',
-          ws:           true,   // proxy WebSocket upgrades (required for socket.io)
+          target: env.VITE_BACKEND_URL || 'http://localhost:3001',
+          ws: true,   // proxy WebSocket upgrades (required for socket.io)
+          changeOrigin: true,
+        },
+        // Forward the metrics beacon (VITE_METRICS_ENDPOINT=/api/metrics) to the
+        // backend too — sendBeacon() resolves relative URLs against the page's
+        // own origin (Vite here), so without this proxy the POST silently hits
+        // Vite instead of the backend and writeMetrics() never runs.
+        '/api': {
+          target: env.VITE_BACKEND_URL || 'http://localhost:3001',
           changeOrigin: true,
         },
       },
@@ -79,16 +87,38 @@ export default defineConfig(({ mode }) => {
       port: 4173,
     },
 
+    // build: {
+    //   outDir:    'dist',
+    //   sourcemap: false,
+    //   // Split vendor chunks for better browser caching
+    //   rollupOptions: {
+    //     output: {
+    //       manualChunks: {
+    //         react:    ['react', 'react-dom'],
+    //         router:   ['react-router-dom'],
+    //         socketio: ['socket.io-client'],
+    //       },
+    //     },
+    //   },
+    // },
     build: {
-      outDir:    'dist',
+      outDir: 'dist',
       sourcemap: false,
-      // Split vendor chunks for better browser caching
+      // Split vendor chunks for better browser caching using function syntax for Rolldown
       rollupOptions: {
         output: {
-          manualChunks: {
-            react:    ['react', 'react-dom'],
-            router:   ['react-router-dom'],
-            socketio: ['socket.io-client'],
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react-router-dom')) {
+                return 'router';
+              }
+              if (id.includes('react') || id.includes('react-dom')) {
+                return 'react';
+              }
+              if (id.includes('socket.io-client')) {
+                return 'socketio';
+              }
+            }
           },
         },
       },
