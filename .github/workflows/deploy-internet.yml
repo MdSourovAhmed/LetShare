@@ -137,8 +137,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/letshare-internet-backend
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/letshare-internet-frontend
+  # BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/letshare-internet-backend
+  # FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/letshare-internet-frontend
+  BACKEND_IMAGE:  ghcr.io/mdsourovahmed/letshare-internet-backend
+  FRONTEND_IMAGE: ghcr.io/mdsourovahmed/letshare-internet-frontend
 
 jobs:
   build-and-push:
