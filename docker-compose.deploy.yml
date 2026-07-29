@@ -226,7 +226,7 @@ services:
       retries: 5
 
   internet-backend-prod:
-    image: ghcr.io/${GHCR_OWNER}/letshare-internet-backend:latest
+    image: ghcr.io/mdsourovahmed/letshare-internet-backend:latest
     restart: unless-stopped
     # No ports published — only reachable from other containers on
     # letshare-deploy-net (nginx, inside internet-frontend-prod, proxies to
@@ -253,7 +253,7 @@ services:
       retries: 3
 
   internet-frontend-prod:
-    image: ghcr.io/${GHCR_OWNER}/letshare-internet-frontend:latest
+    image: ghcr.io/mdsourovahmed/letshare-internet-frontend:latest
     restart: unless-stopped
     # No ports published either — Caddy is the only public entry point.
     # This name must match the proxy_pass targets baked into
@@ -279,22 +279,22 @@ services:
   # Static long-term credentials (TURN_USERNAME/TURN_CREDENTIAL below) must
   # match VITE_TURN_USERNAME/VITE_TURN_CREDENTIAL used at frontend build
   # time — see .github/workflows/deploy-internet.yml.
-  coturn:
-    image: coturn/coturn:latest
-    restart: unless-stopped
-    network_mode: host
-    command: >
-      -n
-      --listening-port=3478
-      --min-port=49152
-      --max-port=49252
-      --external-ip=${VPS_PUBLIC_IP}
-      --realm=${TURN_REALM}
-      --user=${TURN_USERNAME}:${TURN_CREDENTIAL}
-      --lt-cred-mech
-      --no-cli
-      --no-tlsv1
-      --no-tlsv1_1
+  # coturn:
+  #   image: coturn/coturn:latest
+  #   restart: unless-stopped
+  #   network_mode: host
+  #   command: >
+  #     -n
+  #     --listening-port=3478
+  #     --min-port=49152
+  #     --max-port=49252
+  #     --external-ip=${VPS_PUBLIC_IP}
+  #     --realm=${TURN_REALM}
+  #     --user=${TURN_USERNAME}:${TURN_CREDENTIAL}
+  #     --lt-cred-mech
+  #     --no-cli
+  #     --no-tlsv1
+  #     --no-tlsv1_1
 
   # ── Grafana Cloud connectivity ────────────────────────────────────────────
   # Both of these are additive — they don't change how anything above
