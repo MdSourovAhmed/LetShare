@@ -109,7 +109,6 @@ on:
       - "package-lock.json"
       - "docker-compose.deploy.yml"
       - "Caddyfile"
-      - "observability/alloy-config.alloy"
       - ".github/workflows/deploy-internet.yml"
   workflow_dispatch:   # manual "Run workflow" button, for redeploys without a code change
 
@@ -181,11 +180,11 @@ jobs:
           context: .
           file: apps/internet/frontend/Dockerfile
           push: true
-          build-args: |
-            VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL }}
-            VITE_TURN_URL=${{ secrets.VITE_TURN_URL }}
-            VITE_TURN_USERNAME=${{ secrets.VITE_TURN_USERNAME }}
-            VITE_TURN_CREDENTIAL=${{ secrets.VITE_TURN_CREDENTIAL }}
+          # build-args: |
+          #   VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL }}
+          #   VITE_TURN_URL=${{ secrets.VITE_TURN_URL }}
+          #   VITE_TURN_USERNAME=${{ secrets.VITE_TURN_USERNAME }}
+          #   VITE_TURN_CREDENTIAL=${{ secrets.VITE_TURN_CREDENTIAL }}
           tags: |
             ${{ env.FRONTEND_IMAGE }}:latest
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
@@ -212,7 +211,7 @@ jobs:
           host:     ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key:      ${{ secrets.VPS_SSH_KEY }}
-          source:   "docker-compose.deploy.yml,Caddyfile,observability/alloy-config.alloy"
+          source:   "docker-compose.yml,docker-compose.deploy.yml,Caddyfile"
           target:   ${{ secrets.VPS_DEPLOY_DIR }}
           strip_components: 0
 
