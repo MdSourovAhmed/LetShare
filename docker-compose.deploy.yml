@@ -185,22 +185,22 @@ services:
   # ── TLS termination ─────────────────────────────────────────────────────
   # The only container with a port published to the host. Everything else
   # is reached through it, over the internal Docker network.
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
-      - "443:443"
-      - "443:443/udp"   # HTTP/3
-    environment:
-      DOMAIN: "${DOMAIN}"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
-      - caddy_config:/config
-    depends_on:
-      - internet-frontend-prod
-    networks: [letshare-deploy-net]
+  # caddy:
+  #   image: caddy:2-alpine
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
+  #     - "443:443"
+  #     - "443:443/udp"   # HTTP/3
+  #   environment:
+  #     DOMAIN: "${DOMAIN}"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
+  #     - caddy_config:/config
+  #   depends_on:
+  #     - internet-frontend-prod
+  #   networks: [letshare-deploy-net]
 
   # ── InfluxDB (private) ────────────────────────────────────────────────────
   # No ports published — same reasoning as internet-backend-prod below.
@@ -228,6 +228,8 @@ services:
   internet-backend-prod:
     image: ghcr.io/mdsourovahmed/letshare-internet-backend:latest
     restart: unless-stopped
+    ports:
+      - "3001:3001"
     # No ports published — only reachable from other containers on
     # letshare-deploy-net (nginx, inside internet-frontend-prod, proxies to
     # it by service name). Smaller attack surface: the backend is simply
@@ -258,6 +260,8 @@ services:
     # No ports published either — Caddy is the only public entry point.
     # This name must match the proxy_pass targets baked into
     # apps/internet/frontend/nginx.conf (/api/, /socket.io/) at build time.
+    ports:
+    - "80:80"
     depends_on:
       - internet-backend-prod
     networks: [letshare-deploy-net]
