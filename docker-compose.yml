@@ -1,3 +1,5 @@
+
+
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  LetsShare — Docker Compose                                              ║
 # ║                                                                          ║
@@ -201,9 +203,21 @@ services:
 # ── Observability stack — opt-in via `docker compose --profile observability up` ──
 # Entirely separate from the app profiles above. Both backends already write
 # to InfluxDB when INFLUX_TOKEN is set (see each service's environment block);
-# this just gives you somewhere for those writes to land, plus Grafana to
-# view them. Two buckets, two datasources, two dashboards — internet and lan
-# never share a query.
+# this just gives you somewhere for those writes to land, plus Grafana Cloud
+# to view them. Two buckets — internet and lan never share a query.
+#
+# Instead of a local Grafana, we run the Grafana Cloud Private Data Source
+# Connect (PDC) agent. It opens a secure tunnel so your Grafana Cloud stack
+# can query the private InfluxDB without exposing port 8086 publicly.
+# Required env vars (set in .env or the shell):
+#   GCLOUD_PDC_SIGNING_TOKEN   – token with pdc-signing:write scope
+#   GCLOUD_HOSTED_GRAFANA_ID   – your Hosted Grafana stack ID
+#   GCLOUD_PDC_CLUSTER         – e.g. prod-us-central-0 (shown in Cloud UI)
+#
+# Logs (both backends' JSONL files) ship to Grafana Cloud Loki via Alloy —
+# separate concern from PDC (PDC is query-side, for InfluxDB; Alloy is
+# push-side, for logs), so it's its own service and its own set of secrets:
+#   GRAFANA_CLOUD_LOKI_URL / _USER / _API_KEY  – Cloud → Connections → Loki
 
   influxdb:
     profiles: [observability]
@@ -211,12 +225,12 @@ services:
     ports:
       - "8086:8086"
     environment:
-      DOCKER_INFLUXDB_INIT_MODE:          setup
-      DOCKER_INFLUXDB_INIT_USERNAME:      admin
-      DOCKER_INFLUXDB_INIT_PASSWORD:      ${INFLUX_ADMIN_PASSWORD:-letshare-admin}
-      DOCKER_INFLUXDB_INIT_ORG:           ${INFLUX_ORG:-letshare}
-      DOCKER_INFLUXDB_INIT_BUCKET:        internet_transfers   # 2nd bucket created below
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN:   ${INFLUX_TOKEN}
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD:-letshare-admin}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-letshare}
+      DOCKER_INFLUXDB_INIT_BUCKET: internet_transfers # 2nd bucket created below
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
     volumes:
       - influxdb_data:/var/lib/influxdb2
     networks: [letshare-net]
@@ -243,26 +257,47 @@ services:
       --org ${INFLUX_ORG:-letshare} --token ${INFLUX_TOKEN}
       --host http://influxdb:8086 || true"
 
-  grafana:
+  # Grafana Cloud PDC agent — tunnels private data sources (InfluxDB) to
+  # your Grafana Cloud stack. No local Grafana UI; use grafana.com instead.
+  pdc-agent:
     profiles: [observability]
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
+    image: grafana/pdc-agent:latest
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-letshare-admin}
-      GF_AUTH_ANONYMOUS_ENABLED:  "false"
-      INFLUX_URL:                 http://influxdb:8086
-      INFLUX_ORG:                 ${INFLUX_ORG:-letshare}
-      INFLUX_TOKEN:                ${INFLUX_TOKEN}
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/etc/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      influxdb-init:
-        condition: service_completed_successfully
+      GCLOUD_PDC_SIGNING_TOKEN: ${GCLOUD_PDC_SIGNING_TOKEN}
+      GCLOUD_HOSTED_GRAFANA_ID: ${GCLOUD_HOSTED_GRAFANA_ID}
+      GCLOUD_PDC_CLUSTER: ${GCLOUD_PDC_CLUSTER}
+    # Optional: expose metrics (default :8090) if you want to scrape them
+    # ports:
+    #   - "8090:8090"
     networks: [letshare-net]
     restart: unless-stopped
+    depends_on:
+      influxdb:
+        condition: service_healthy
+
+  # Ships both backends' JSONL logs to Grafana Cloud Loki — reads the exact
+  # files METRICS_LOG_FILE already writes in each backend's dev volume
+  # mount, nothing new to configure on the backend side. Config lives in
+  # ./observability/alloy-config.alloy (shared, unchanged, with
+  # docker-compose.deploy.yml).
+  # alloy:
+  #   profiles: [observability]
+  #   image: grafana/alloy:latest
+  #   restart: unless-stopped
+  #   command:
+  #     - run
+  #     - /etc/alloy/config.alloy
+  #     - --storage.path=/var/lib/alloy/data
+  #   environment:
+  #     GRAFANA_CLOUD_LOKI_URL: "${GRAFANA_CLOUD_LOKI_URL}"
+  #     GRAFANA_CLOUD_LOKI_USER: "${GRAFANA_CLOUD_LOKI_USER}"
+  #     GRAFANA_CLOUD_LOKI_API_KEY: "${GRAFANA_CLOUD_LOKI_API_KEY}"
+  #   volumes:
+  #     - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
+  #     - ./apps/internet/backend/logs:/var/log/letshare/internet:ro
+  #     - ./apps/lan/backend/logs:/var/log/letshare/lan:ro
+  #     - alloy_data:/var/lib/alloy/data
+  #   networks: [letshare-net]
 
 # ── Named volumes (node_modules stay inside containers) ──────────────────────
 # These prevent the host's node_modules (or absence of them) from leaking
@@ -273,7 +308,7 @@ volumes:
   lan_backend_modules:
   lan_frontend_modules:
   influxdb_data:
-  grafana_data:
+  alloy_data:
 
 networks:
   letshare-net:

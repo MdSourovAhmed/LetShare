@@ -1,8 +1,104 @@
+# name: Deploy Internet app
+
+# # Only runs when something the Internet app actually depends on changes —
+# # packages/core is shared, so a LAN-only change never triggers this, and a
+# # core change correctly does (both apps use it).
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - "apps/internet/**"
+#       - "packages/core/**"
+#       - "package.json"
+#       - "package-lock.json"
+#       - ".github/workflows/deploy-internet.yml"
+#   workflow_dispatch:   # manual "Run workflow" button, for redeploys without a code change
+
+# env:
+#   REGISTRY: ghcr.io
+#   BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/letshare-internet-backend
+#   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/letshare-internet-frontend
+#   # BACKEND_IMAGE:  ghcr.io/mdsourovahmed/letshare-internet-backend
+#   # FRONTEND_IMAGE: ghcr.io/mdsourovahmed/letshare-internet-frontend
+
+# jobs:
+#   build-and-push:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#       packages: write   # required to push to GHCR
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - uses: docker/setup-buildx-action@v3
+
+#       - name: Log in to GHCR
+#         uses: docker/login-action@v3
+#         with:
+#           registry: ghcr.io
+#           username: ${{ github.actor }}
+#           password: ${{ secrets.GITHUB_TOKEN }}   # no extra secret needed — built into every run
+
+#       # Two tags per image: :latest (what the VPS pulls) and :<short-sha>
+#       # (so a bad deploy can be rolled back to an exact previous build,
+#       # not just "whatever was last pushed").
+#       - name: Build and push backend image
+#         uses: docker/build-push-action@v5
+#         with:
+#           context: .                                    # monorepo root — see apps/internet/backend/Dockerfile
+#           file: apps/internet/backend/Dockerfile
+#           push: true
+#           tags: |
+#             ${{ env.BACKEND_IMAGE }}:latest
+#             ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+#           cache-from: type=gha
+#           cache-to: type=gha,mode=max
+
+#       - name: Build and push frontend image
+#         uses: docker/build-push-action@v5
+#         with:
+#           context: .
+#           file: apps/internet/frontend/Dockerfile
+#           push: true
+#           build-args: |
+#             VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL }}
+#             VITE_TURN_URL=${{ secrets.VITE_TURN_URL }}
+#             VITE_TURN_USERNAME=${{ secrets.VITE_TURN_USERNAME }}
+#             VITE_TURN_CREDENTIAL=${{ secrets.VITE_TURN_CREDENTIAL }}
+#           tags: |
+#             ${{ env.FRONTEND_IMAGE }}:latest
+#             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+#           cache-from: type=gha
+#           cache-to: type=gha,mode=max
+
+#   deploy:
+#     needs: build-and-push
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#     steps:
+#       - name: SSH into VPS and redeploy
+#         uses: appleboy/ssh-action@v1.0.3
+#         with:
+#           host:     ${{ secrets.VPS_HOST }}
+#           username: ${{ secrets.VPS_USER }}
+#           key:      ${{ secrets.VPS_SSH_KEY }}
+#           script: |
+#             set -e
+#             cd ${{ secrets.VPS_DEPLOY_DIR }}
+#             docker compose -f docker-compose.deploy.yml pull
+#             docker compose -f docker-compose.deploy.yml up -d
+#             docker image prune -f   # drop now-unused old image layers, keep disk usage flat
+
+
 name: Deploy Internet app
 
 # Only runs when something the Internet app actually depends on changes —
 # packages/core is shared, so a LAN-only change never triggers this, and a
-# core change correctly does (both apps use it).
+# core change correctly does (both apps use it). Also triggers on the
+# deploy-time config files themselves, now that the deploy job syncs them
+# to the VPS — a docker-compose.deploy.yml change (like adding a new
+# service) needs to actually reach the VPS, not just build images.
 on:
   push:
     branches: [main]
@@ -11,15 +107,38 @@ on:
       - "packages/core/**"
       - "package.json"
       - "package-lock.json"
+      - "docker-compose.deploy.yml"
+      - "Caddyfile"
+      - "observability/alloy-config.alloy"
       - ".github/workflows/deploy-internet.yml"
   workflow_dispatch:   # manual "Run workflow" button, for redeploys without a code change
+
+# ── Managing the VPS's .env file ────────────────────────────────────────────
+# .env is never committed to the repo (it's secrets), and the VPS doesn't
+# hand-maintain its own copy either — that drifts the moment someone adds a
+# variable and forgets to SSH in and update it (exactly what happened when
+# INFLUX_TOKEN, GCLOUD_PDC_SIGNING_TOKEN, etc. were added this session). Instead:
+#
+#   1. Keep a real .env locally (never committed — same file you'd have
+#      built by following deploy.env.example), with every current value.
+#   2. Whenever it changes, re-encode and update ONE GitHub secret:
+#        base64 -w0 .env | pbcopy      # macOS — copies to clipboard
+#        base64 -w0 .env               # Linux — copy the output manually
+#      Paste that into the repo secret VPS_ENV_FILE_B64 (Settings → Secrets
+#      and variables → Actions → Secrets).
+#   3. Push, or run this workflow manually. The deploy job decodes that
+#      secret and overwrites .env on the VPS on every single run — so the
+#      GitHub secret is the actual source of truth, and the VPS's copy is
+#      just a build artifact of it, the same way the Docker images are.
+#
+# This means a first-time deploy needs VPS_ENV_FILE_B64 set BEFORE the
+# first push — there's nothing on a fresh VPS for docker compose to read
+# otherwise.
 
 env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/letshare-internet-backend
   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/letshare-internet-frontend
-  # BACKEND_IMAGE:  ghcr.io/mdsourovahmed/letshare-internet-backend
-  # FRONTEND_IMAGE: ghcr.io/mdsourovahmed/letshare-internet-frontend
 
 jobs:
   build-and-push:
@@ -74,10 +193,28 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - name: SSH into VPS and redeploy
+      - uses: actions/checkout@v4
+
+      # ── Sync config files (not secrets) from the repo to the VPS ────────────
+      # Previously, docker-compose.deploy.yml / Caddyfile / the alloy config
+      # were copied to the VPS once, by hand, and never touched again — so a
+      # change committed to any of them (like the InfluxDB/PDC/Alloy services
+      # added this session) would silently NOT be live on the VPS until
+      # someone remembered to re-copy it manually. This step makes the repo
+      # the actual source of truth: every deploy overwrites these with
+      # whatever's in the commit being deployed.
+      - name: Sync compose + config files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key:      ${{ secrets.VPS_SSH_KEY }}
+          source:   "docker-compose.deploy.yml,Caddyfile,observability/alloy-config.alloy"
+          target:   ${{ secrets.VPS_DEPLOY_DIR }}
+          strip_components: 0
+
+      - name: Sync .env and redeploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host:     ${{ secrets.VPS_HOST }}
@@ -86,6 +223,23 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.VPS_DEPLOY_DIR }}
+
+            # ── .env is managed from GitHub too, not hand-edited over SSH ──────
+            # VPS_ENV_FILE_B64 is the ENTIRE .env file, base64-encoded, stored
+            # as one GitHub secret. Every deploy overwrites .env with it, so
+            # adding a new variable (like the Grafana Cloud ones this session)
+            # means updating one secret, not SSHing in — see the "Managing
+            # the .env file" section in this workflow's own header comment.
+            echo '${{ secrets.VPS_ENV_FILE_B64 }}' | base64 -d > .env
+            [ -s .env ] || { echo "ERROR: .env is empty after decoding VPS_ENV_FILE_B64 — check the secret is set and valid base64."; exit 1; }
+
             docker compose -f docker-compose.deploy.yml pull
             docker compose -f docker-compose.deploy.yml up -d
             docker image prune -f   # drop now-unused old image layers, keep disk usage flat
+
+
+
+
+
+
+
