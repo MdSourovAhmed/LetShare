@@ -4,6 +4,6 @@
 # proxying to the backend — Caddy's only job is TLS termination and getting
 # traffic to that one container.
 
-{$DOMAIN} {
+http://{$DOMAIN} {
 	reverse_proxy internet-frontend-prod:80
 }
