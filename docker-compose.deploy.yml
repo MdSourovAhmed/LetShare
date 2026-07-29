@@ -228,8 +228,6 @@ services:
   internet-backend-prod:
     image: ghcr.io/mdsourovahmed/letshare-internet-backend:latest
     restart: unless-stopped
-    ports:
-      - "3001:3001"
     # No ports published — only reachable from other containers on
     # letshare-deploy-net (nginx, inside internet-frontend-prod, proxies to
     # it by service name). Smaller attack surface: the backend is simply
@@ -242,6 +240,8 @@ services:
       INFLUX_ORG: "${INFLUX_ORG:-letshare}"
       INFLUX_BUCKET: "internet_transfers"
       METRICS_LOG_FILE: "./logs/internet-transfers.jsonl"
+    ports:
+      - "3001:3001"  
     volumes:
       - ./logs/internet-backend:/app/apps/internet/backend/logs
     depends_on:
