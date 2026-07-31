@@ -21,10 +21,10 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 
-const INFLUX_URL      = process.env.INFLUX_URL    || 'http://localhost:8086'
-const INFLUX_TOKEN    = process.env.INFLUX_TOKEN  || ''
-const INFLUX_ORG      = process.env.INFLUX_ORG    || 'letshare'
-const INFLUX_BUCKET   = process.env.INFLUX_BUCKET || 'transfers'
+const INFLUX_URL = process.env.INFLUX_URL || 'http://localhost:8086'
+const INFLUX_TOKEN = process.env.INFLUX_TOKEN || ''
+const INFLUX_ORG = process.env.INFLUX_ORG || 'letshare'
+const INFLUX_BUCKET = process.env.INFLUX_BUCKET || 'transfers'
 const METRICS_LOG_FILE = process.env.METRICS_LOG_FILE || null
 
 const WRITE_URL = `${INFLUX_URL}/api/v2/write?org=${INFLUX_ORG}&bucket=${INFLUX_BUCKET}&precision=ms`
@@ -80,39 +80,270 @@ export async function writeMetrics(payload) {
 
   if (!INFLUX_TOKEN) return
 
-  const tags = `mode=${escapeTag(mode)},role=${escapeTag(role)},transferId=${escapeTag(transferId)},outcome=${escapeTag(outcome || 'done')}`
+  // const tags = `mode=${escapeTag(mode)},role=${escapeTag(role)},transferId=${escapeTag(transferId)},outcome=${escapeTag(outcome || 'done')}`
+
+  const tags =
+    `mode=${escapeTag(mode)},
+role=${escapeTag(role)},
+outcome=${escapeTag(outcome || 'done')}`
+
+
+  const MB = 1024 * 1024
+
+  const totalBytes = Number(summary.totalBytes) || 0
+  const durationMs = Number(summary.durationMs) || 0
+  const connectionMs = Number(summary.connectionMs) || 0
+  const avgSpeedBps = Number(summary.avgSpeedBps) || 0
+  const peakSpeedBps = Number(summary.peakSpeedBps) || 0
+  const chunkCount = Number(summary.chunkCount) || 0
+  const backpressurePauses = Number(summary.backpressurePauses) || 0
+  const backpressureTotalMs = Number(summary.backpressureTotalMs) || 0
+  const rttMs = Number(summary.rttMs) || 0
+  const availableBitrate = Number(summary.availableBitrate) || 0
+  const sctpBytesSent = Number(summary.sctpBytesSent) || 0
+
+
+
+  const transferSizeMB = totalBytes / MB
+
+  const durationSec = durationMs / 1000
+
+  const avgSpeedMBps =
+    avgSpeedBps / MB
+
+  const peakSpeedMBps =
+    peakSpeedBps / MB
+
+  const avgSpeedMbps =
+    (avgSpeedBps * 8) / 1_000_000
+
+  const peakSpeedMbps =
+    (peakSpeedBps * 8) / 1_000_000
+
+
+
+  const avgChunkSize =
+    chunkCount
+      ? totalBytes / chunkCount
+      : 0
+
+
+  const backpressurePercent =
+    durationMs
+      ? (backpressureTotalMs / durationMs) * 100
+      : 0
+
+  const avgPauseMs =
+    backpressurePauses
+      ? backpressureTotalMs / backpressurePauses
+      : 0
+
+
+
+  const connectionRatio =
+    durationMs
+      ? connectionMs / durationMs
+      : 0
+
+
+  const throughputEfficiency =
+    availableBitrate
+      ? avgSpeedBps / availableBitrate
+      : null
+
+
+
+  const effectiveSpeedBps =
+    durationMs
+      ? totalBytes / (durationMs / 1000)
+      : 0
+
+
+  const success =
+    (outcome === "done") ? 1 : 0
+
+
+
+  const samples = summary.speedSamples ?? []
+
+
+  const minSpeedBps =
+    samples.length
+      ? Math.min(...samples)
+      : null
+
+  const maxSpeedBps =
+    samples.length
+      ? Math.max(...samples)
+      : null
+
+  const meanSpeedBps =
+    samples.length
+      ? samples.reduce((a, b) => a + b, 0) / samples.length
+      : null
+
+  const sorted =
+    [...samples].sort((a, b) => a - b)
+
+  const medianSpeedBps =
+    sorted.length
+      ? sorted[Math.floor(sorted.length / 2)]
+      : null
+
+
+  const speedStdDev =
+    samples.length
+      ? Math.sqrt(
+        samples.reduce(
+          (sum, x) =>
+            sum + Math.pow(x - meanSpeedBps, 2),
+          0
+        ) / samples.length
+      )
+      : null
+
+
+  const speed95Percentile =
+    sorted.length
+      ? sorted[
+      Math.floor(sorted.length * 0.95)
+      ]
+      : null
+
+  let healthScore = 100
+
+  healthScore -= Math.min(rttMs / 5, 20)
+
+  healthScore -= Math.min(backpressurePercent / 2, 40)
+
+  healthScore -= Math.min(connectionRatio * 100, 20)
+
+  healthScore = Math.max(healthScore, 0)
+
+
+  const congestionScore =
+
+    (backpressurePercent * 0.5) +
+
+    (rttMs * 0.3) +
+
+    (connectionRatio * 100 * 0.2)
+
+
+
 
   const fields = [
-    `totalBytes=${Number(summary.totalBytes) || 0}i`,
-    `durationMs=${Number(summary.durationMs) || 0}i`,
-    numField('connectionMs',        summary.connectionMs,        true),
-    numField('avgSpeedBps',         summary.avgSpeedBps),
-    numField('peakSpeedBps',        summary.peakSpeedBps),
-    numField('chunkCount',          summary.chunkCount,          true),
-    numField('backpressurePauses',  summary.backpressurePauses,  true),
-    numField('backpressureTotalMs', summary.backpressureTotalMs, true),
-    numField('rttMs',               summary.rttMs),
-    numField('availableBitrate',    summary.availableBitrate),
-    numField('sctpBytesSent',       summary.sctpBytesSent,       true),
-    numField('fileCount',           summary.files?.length,       true),
-  ].filter(Boolean).join(',')
+
+    `transferId="${transferId}"`,
+
+    `totalBytes=${totalBytes}i`,
+    `transferSizeMB=${transferSizeMB}`,
+
+    `durationMs=${durationMs}i`,
+    `durationSec=${durationSec}`,
+
+    `connectionMs=${connectionMs}i`,
+    `connectionRatio=${connectionRatio}`,
+
+    `avgSpeedBps=${avgSpeedBps}`,
+    `avgSpeedMBps=${avgSpeedMBps}`,
+    `avgSpeedMbps=${avgSpeedMbps}`,
+
+    `peakSpeedBps=${peakSpeedBps}`,
+    `peakSpeedMBps=${peakSpeedMBps}`,
+    `peakSpeedMbps=${peakSpeedMbps}`,
+
+    numField("minSpeedBps", minSpeedBps),
+
+    numField("maxSpeedBps", maxSpeedBps),
+
+    numField("meanSpeedBps", meanSpeedBps),
+
+    numField("medianSpeedBps", medianSpeedBps),
+
+    numField("speedStdDev", speedStdDev),
+
+    numField("speed95Percentile", speed95Percentile),
+
+    `chunkCount=${chunkCount}i`,
+
+    `avgChunkSize=${avgChunkSize}`,
+
+    `backpressurePauses=${backpressurePauses}i`,
+
+    `backpressureTotalMs=${backpressureTotalMs}i`,
+
+    `backpressurePercent=${backpressurePercent}`,
+
+    `avgPauseMs=${avgPauseMs}`,
+
+    numField("rttMs", rttMs),
+
+    numField("availableBitrate", availableBitrate),
+
+    `throughputEfficiency=${throughputEfficiency ?? 0}`,
+
+    `sctpBytesSent=${sctpBytesSent}i`,
+
+    `effectiveSpeedBps=${effectiveSpeedBps}`,
+
+    `fileCount=${summary.files?.length || 0}i`,
+
+    `success=${success}i`,
+
+    `healthScore=${healthScore}`,
+
+    `congestionScore=${congestionScore}`
+
+  ].filter(Boolean).join(",")
+
 
   const lines = [`transfer_summary,${tags} ${fields} ${Date.now()}`]
 
   // ── Per-file breakdown — one line per file ──────────────────────────────
-  // Lets Grafana answer "which files/sizes are slow" per mode, not just
-  // "how was the transfer overall". fileStatus is a tag (low cardinality:
-  // done/error/skipped) so it's cheaply groupable/filterable.
+  // One measurement per file transferred. Useful for Grafana analysis like:
+  // • Transfer speed by file type
+  // • Duration vs file size
+  // • Success/failure by extension
+  // • Large file performance
+
   if (Array.isArray(summary.files)) {
     summary.files.forEach((f, i) => {
-      const fTags = `mode=${escapeTag(mode)},role=${escapeTag(role)},transferId=${escapeTag(transferId)},fileStatus=${escapeTag(f.status || 'done')}`
+      const size = Number(f.size) || 0
+      const durationMs = Number(f.durationMs) || 0
+      const avgSpeedBps = Number(f.avgSpeedBps) || 0
+
+      const sizeMB = size / (1024 * 1024)
+      const durationSec = durationMs / 1000
+      const avgSpeedMbps = (avgSpeedBps * 8) / 1_000_000
+
+      // Extract extension (e.g. pdf, jpg, mp4)
+      const extension =
+        (f.name?.split(".").pop() || "unknown").toLowerCase()
+
+      const status = f.status || "done"
+
+      const fTags =
+        `mode=${escapeTag(mode)},` +
+        `role=${escapeTag(role)},` +
+        `outcome=${escapeTag(outcome || "done")},` +
+        `extension=${escapeTag(extension)},` +
+        `status=${escapeTag(status)}`
+
       const fFields = [
+        `transferId="${transferId}"`,
         `fileIndex=${i}i`,
-        `size=${Number(f.size) || 0}i`,
-        `durationMs=${Number(f.durationMs) || 0}i`,
-        `avgSpeedBps=${Number(f.avgSpeedBps) || 0}`,
-      ].join(',')
-      lines.push(`transfer_file,${fTags} ${fFields} ${Date.now()}`)
+        `size=${size}i`,
+        `sizeMB=${sizeMB}`,
+        `durationMs=${durationMs}i`,
+        `durationSec=${durationSec}`,
+        `avgSpeedBps=${avgSpeedBps}`,
+        `avgSpeedMbps=${avgSpeedMbps}`
+      ].join(",")
+
+      lines.push(
+        `transfer_file,${fTags} ${fFields} ${Date.now()}`
+      )
     })
   }
 
@@ -120,7 +351,7 @@ export async function writeMetrics(payload) {
 
   try {
     const res = await fetch(WRITE_URL, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Authorization': `Token ${INFLUX_TOKEN}`, 'Content-Type': 'text/plain; charset=utf-8' },
       body,
     })
