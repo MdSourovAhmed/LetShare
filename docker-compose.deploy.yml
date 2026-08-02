@@ -192,8 +192,8 @@ services:
   #     - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
   #     - "443:443"
   #     - "443:443/udp"   # HTTP/3
-  #   environment:
-  #     DOMAIN: "${DOMAIN}"
+  #   # environment:      #use only if have a domain name
+  #   #   DOMAIN: "${DOMAIN}"
   #   volumes:
   #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
   #     - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
@@ -209,6 +209,8 @@ services:
   influxdb:
     image: influxdb:2
     restart: unless-stopped
+    ports:
+      - "443:8086"
     environment:
       DOCKER_INFLUXDB_INIT_MODE:        setup
       DOCKER_INFLUXDB_INIT_USERNAME:    admin
