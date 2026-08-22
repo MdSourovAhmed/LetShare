@@ -1,206 +1,23 @@
-# # docker-compose.deploy.yml — lives on the VPS, not part of the build.
-# #
-# # Deliberately separate from the root docker-compose.yml (which builds from
-# # source for local dev/testing). This one only ever pulls pre-built images —
-# # the VPS never runs `npm install` or `vite build`, it just runs containers.
-# # That's the whole point of building in CI: the VPS stays small and fast to
-# # deploy to, and a bad build never gets a chance to half-succeed on the
-# # production box.
-# #
-# # HTTPS is not optional here — crypto.randomUUID() (used by telemetry) and
-# # several other browser APIs simply don't exist outside a secure context
-# # (HTTPS, or localhost). Serving over plain HTTP isn't just less secure,
-# # parts of the app will throw. Caddy below handles this automatically: point
-# # a domain's DNS A record at the VPS, set DOMAIN in .env, and it provisions
-# # and renews a real Let's Encrypt certificate with no other config.
-# #
-# # Setup on the VPS (one-time):
-# #   1. mkdir -p ~/letshare-deploy && cd ~/letshare-deploy
-# #   2. Copy this file and Caddyfile there, plus a .env (see deploy.env.example)
-# #   3. Point DOMAIN's DNS A record at this VPS's public IP — Caddy's
-# #      certificate request will fail until this resolves correctly
-# #   4. docker login ghcr.io -u <your-github-username>   # needs a PAT with read:packages,
-# #      OR make the GHCR packages public so no login is needed to pull
-# #   5. docker compose -f docker-compose.deploy.yml up -d
-# #
-# # After that, GitHub Actions (.github/workflows/deploy-internet.yml) handles
-# # every subsequent deploy via SSH — see VPS_DEPLOY_DIR secret, which must
-# # point at this directory.
-
-# services:
-#   # ── TLS termination ─────────────────────────────────────────────────────
-#   # The only container with a port published to the host. Everything else
-#   # is reached through it, over the internal Docker network.
-#   caddy:
-#     image: caddy:2-alpine
-#     restart: unless-stopped
-#     ports:
-#       - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
-#       - "443:443"
-#       - "443:443/udp"   # HTTP/3
-#     environment:
-#       DOMAIN: "${DOMAIN}"
-#     volumes:
-#       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-#       - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
-#       - caddy_config:/config
-#     depends_on:
-#       - internet-frontend-prod
-#     networks: [letshare-deploy-net]
-
-#   internet-backend-prod:
-#     image: ghcr.io/${GHCR_OWNER}/letshare-internet-backend:latest
-#     restart: unless-stopped
-#     # No ports published — only reachable from other containers on
-#     # letshare-deploy-net (nginx, inside internet-frontend-prod, proxies to
-#     # it by service name). Smaller attack surface: the backend is simply
-#     # not addressable from the public internet at all.
-#     environment:
-#       PORT: 3001
-#       CORS_ORIGIN: "${INTERNET_CORS_ORIGIN}"
-#       INFLUX_URL: "${INFLUX_URL:-http://influxdb:8086}"
-#       INFLUX_TOKEN: "${INFLUX_TOKEN:-}"
-#       INFLUX_ORG: "${INFLUX_ORG:-letshare}"
-#       INFLUX_BUCKET: "internet_transfers"
-#       METRICS_LOG_FILE: "./logs/internet-transfers.jsonl"
-#     volumes:
-#       - ./logs/internet-backend:/app/apps/internet/backend/logs
-#     networks: [letshare-deploy-net]
-#     healthcheck:
-#       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
-#       interval: 15s
-#       timeout: 5s
-#       retries: 3
-
-#   internet-frontend-prod:
-#     image: ghcr.io/${GHCR_OWNER}/letshare-internet-frontend:latest
-#     restart: unless-stopped
-#     # No ports published either — Caddy is the only public entry point.
-#     # This name must match the proxy_pass targets baked into
-#     # apps/internet/frontend/nginx.conf (/api/, /socket.io/) at build time.
-#     depends_on:
-#       - internet-backend-prod
-#     networks: [letshare-deploy-net]
-
-#   # ── TURN server (coturn) ─────────────────────────────────────────────────
-#   # Fixes: "No TURN server configured" warning in the browser console.
-#   # STUN (already configured, no setup needed) gets most peers connected
-#   # directly. It fails for peers behind symmetric NAT or a restrictive
-#   # firewall (common on corporate/mobile networks) — those need a relay,
-#   # which is what this is. Without it, that subset of transfers just never
-#   # connects, silently.
-#   #
-#   # host networking, not published ports: coturn needs a wide UDP port
-#   # range (min-port..max-port below) for media relay. Publishing each of
-#   # those individually is unnecessary — host networking exposes them all
-#   # at once and also avoids Docker's NAT hiding the VPS's real public IP,
-#   # which coturn needs to advertise correctly in ICE candidates.
-#   #
-#   # Static long-term credentials (TURN_USERNAME/TURN_CREDENTIAL below) must
-#   # match VITE_TURN_USERNAME/VITE_TURN_CREDENTIAL used at frontend build
-#   # time — see .github/workflows/deploy-internet.yml.
-#   coturn:
-#     image: coturn/coturn:latest
-#     restart: unless-stopped
-#     network_mode: host
-#     command: >
-#       -n
-#       --listening-port=3478
-#       --min-port=49152
-#       --max-port=49252
-#       --external-ip=${VPS_PUBLIC_IP}
-#       --realm=${TURN_REALM}
-#       --user=${TURN_USERNAME}:${TURN_CREDENTIAL}
-#       --lt-cred-mech
-#       --no-cli
-#       --no-tlsv1
-#       --no-tlsv1_1
-
-# networks:
-#   letshare-deploy-net:
-#     driver: bridge
-
-# volumes:
-#   caddy_data:
-#   caddy_config:
-
-
-
-
-
-
-# docker-compose.deploy.yml — lives on the VPS, not part of the build.
-#
-# Deliberately separate from the root docker-compose.yml (which builds from
-# source for local dev/testing). This one only ever pulls pre-built images —
-# the VPS never runs `npm install` or `vite build`, it just runs containers.
-# That's the whole point of building in CI: the VPS stays small and fast to
-# deploy to, and a bad build never gets a chance to half-succeed on the
-# production box.
-#
-# HTTPS is not optional here — crypto.randomUUID() (used by telemetry) and
-# several other browser APIs simply don't exist outside a secure context
-# (HTTPS, or localhost). Serving over plain HTTP isn't just less secure,
-# parts of the app will throw. Caddy below handles this automatically: point
-# a domain's DNS A record at the VPS, set DOMAIN in .env, and it provisions
-# and renews a real Let's Encrypt certificate with no other config.
-#
-# Setup on the VPS (one-time):
-#   1. mkdir -p ~/letshare-deploy && cd ~/letshare-deploy
-#   2. docker login ghcr.io -u <your-github-username>   # needs a PAT with read:packages,
-#      OR make the GHCR packages public so no login is needed to pull
-#   3. Point DOMAIN's DNS A record at this VPS's public IP — Caddy's
-#      certificate request will fail until this resolves correctly
-#   4. That's it — don't manually copy this file, Caddyfile, the alloy
-#      config, or .env here. The GitHub Actions workflow
-#      (.github/workflows/deploy-internet.yml) syncs all of those on every
-#      deploy, including the first one, as long as VPS_HOST / VPS_USER /
-#      VPS_SSH_KEY / VPS_DEPLOY_DIR / VPS_ENV_FILE_B64 are set as repo
-#      secrets beforehand — see that workflow's header comment for exactly
-#      how .env is managed. Push to main, or run the workflow manually,
-#      and the first deploy creates everything here from scratch.
-#
-# Previously this said to copy the compose file, Caddyfile, and a
-# hand-built .env here manually — that meant every later change to any of
-# them had to also be manually re-copied over SSH, and silently wasn't
-# live otherwise. Not anymore: this file, and .env, are both now
-# reproducible entirely from what's in GitHub (the repo, and one secret,
-# respectively) — treat any local copy on the VPS as a build artifact, not
-# something to hand-edit.
-#
-# After that, GitHub Actions (.github/workflows/deploy-internet.yml) handles
-# every subsequent deploy via SSH — see VPS_DEPLOY_DIR secret, which must
-# point at this directory.
-#
-# ── Grafana Cloud (optional, opt-in) ─────────────────────────────────────
-# Add these to your local .env, re-encode it, and update the
-# VPS_ENV_FILE_B64 secret (see the workflow's header comment) to enable PDC
-# + log shipping — leave them unset and pdc-agent/alloy simply idle:
-#   INFLUX_ADMIN_PASSWORD, INFLUX_TOKEN, INFLUX_ORG   (also used to
-#     bootstrap the new local influxdb service below)
-#   GCLOUD_PDC_SIGNING_TOKEN, GCLOUD_HOSTED_GRAFANA_ID, GCLOUD_PDC_CLUSTER
-#   GRAFANA_CLOUD_LOKI_URL, GRAFANA_CLOUD_LOKI_USER, GRAFANA_CLOUD_LOKI_API_KEY
-
 services:
   # ── TLS termination ─────────────────────────────────────────────────────
   # The only container with a port published to the host. Everything else
   # is reached through it, over the internal Docker network.
-  # caddy:
-  #   image: caddy:2-alpine
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
-  #     - "443:443"
-  #     - "443:443/udp"   # HTTP/3
-  #   # environment:      #use only if have a domain name
-  #   #   DOMAIN: "${DOMAIN}"
-  #   volumes:
-  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
-  #     - caddy_config:/config
-  #   depends_on:
-  #     - internet-frontend-prod
-  #   networks: [letshare-deploy-net]
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    # environment:      #use only if have a domain name
+    #   DOMAIN: "letshare.duckdns.org"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
+      - caddy_config:/config
+    depends_on:
+      - internet-frontend-prod
+    networks: [letshare-deploy-net]
 
   # ── InfluxDB (private) ────────────────────────────────────────────────────
   # No ports published — same reasoning as internet-backend-prod below.
@@ -210,7 +27,7 @@ services:
     image: influxdb:2
     restart: unless-stopped
     ports:
-      - "443:8086"
+      - "8086:8086"
     environment:
       DOCKER_INFLUXDB_INIT_MODE:        setup
       DOCKER_INFLUXDB_INIT_USERNAME:    admin

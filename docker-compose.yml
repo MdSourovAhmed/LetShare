@@ -23,6 +23,25 @@
 
 services:
 
+  caddy:
+    profiles: 
+      - prod-lan
+    image: caddy:2-alpine
+    container_name: caddy_server
+    restart: unless-stopped
+    ports:
+      - "80:80"        # Let's Encrypt HTTP-01 চ্যালেঞ্জ এবং HTTP->HTTPS রিডাইরেক্টের জন্য
+      - "443:443"      # HTTPS-এর জন্য
+      - "443:443/udp"  # HTTP/3 (QUIC) সমর্থনের জন্য
+    # environment:
+    #   DOMAIN: "${DOMAIN}" # ডোমেন এনভায়রনমেন্ট ভ্যারিয়েবল (প্রয়োজন হলে)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - letshare-net
+
   # ═══════════════════════════════════════════════════════════════════════════
   # INTERNET APP
   # ═══════════════════════════════════════════════════════════════════════════
@@ -309,6 +328,8 @@ volumes:
   lan_frontend_modules:
   influxdb_data:
   alloy_data:
+  caddy_config:
+  caddy_data:
 
 networks:
   letshare-net:
