@@ -4,12 +4,17 @@
 # proxying to the backend — Caddy's only job is TLS termination and getting
 # traffic to that one container.
 
-letshare.duckdns.org {
-	tls internal
-	reverse_proxy internet-frontend-prod:80
-}
-localhost {
-	tls internal
-	reverse_proxy lan-frontend-prod:80
-}
+# letshare.duckdns.org {
+# 	tls internal
+# 	reverse_proxy internet-frontend-prod:80
+# }
 
+# localhost {
+# 	tls internal
+# 	reverse_proxy lan-frontend-prod:80
+# }
+
+{$DOMAIN} {
+    # Caddy automatically uses Let's Encrypt / ZeroSSL via HTTP-01 on Port 80
+    reverse_proxy internet-frontend-prod:80
+}

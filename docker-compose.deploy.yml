@@ -9,8 +9,9 @@ services:
       - "80:80"     # required for Let's Encrypt's HTTP-01 challenge, and to redirect to :443
       - "443:443"
       - "443:443/udp"   # HTTP/3
-    # environment:      #use only if have a domain name
-    #   DOMAIN: "letshare.duckdns.org"
+    environment:      #use only if have a domain name
+      DOMAIN: "${DOMAIN:-letshare.duckdns.org}"
+      DUCKDNS_TOKEN: "${DUCKDNS_TOKEN}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data       # certificates — must persist across restarts, or you'll hit Let's Encrypt's rate limit
