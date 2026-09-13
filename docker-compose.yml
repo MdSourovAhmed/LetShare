@@ -212,7 +212,7 @@ services:
       context: .
       dockerfile: apps/lan/frontend/Dockerfile
     ports:
-      - "8080:80"       # port 8080 on host → 80 inside container
+      - "80:80"       # port 8080 on host → 80 inside container
     depends_on:
       lan-backend-prod:
         condition: service_healthy

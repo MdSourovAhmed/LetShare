@@ -27,7 +27,7 @@ const INFLUX_TOKEN = process.env.INFLUX_TOKEN || ''
 const INFLUX_ORG   = process.env.INFLUX_ORG   || 'letshare'
 // No default — each backend MUST set its own bucket (internet_transfers / lan_transfers)
 const INFLUX_BUCKET = process.env.INFLUX_BUCKET || null
-const METRICS_LOG_FILE = process.env.METRICS_LOG_FILE || null
+const METRICS_LOG_FILE = process.env.METRICS_LOG_FILE || 'transfer_logs.jsonl'
 
 const WRITE_URL = INFLUX_BUCKET
   ? `${INFLUX_URL}/api/v2/write?org=${encodeURIComponent(INFLUX_ORG)}&bucket=${encodeURIComponent(INFLUX_BUCKET)}&precision=ms`

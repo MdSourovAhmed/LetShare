@@ -1,6 +1,6 @@
 # LetsShare
 
-**Peer-to-peer file sharing, straight from the browser — no cloud storage, no accounts, no size limits.**
+**Peer-to-peer file sharing, straight from the browser — no cloud storage, no accounts, no size artificial file-size limits.**
 
 LetsShare moves files directly between two browsers using **WebRTC**. A lightweight signaling server only helps two browsers find each other; once connected, every byte of your files travels directly from sender to receiver. The server never sees, stores, or proxies your data.
 
@@ -46,16 +46,16 @@ Generate a shareable link, send it to anyone, and they can download your files t
 ### How to use it
 
 <!-- TODO: Replace with actual screenshot of the Send page -->
-![Send page — select files and generate a link](docs/images/internet-send.png)
+![Send page — select files and generate a link](docs/images/I-1.png)
 
 <!-- TODO: Replace with actual screenshot of the generated share link -->
-![Share link generated, ready to copy](docs/images/internet-share-link.png)
+![Share link generated, ready to copy](docs/images/I-2.png)
 
 <!-- TODO: Replace with actual screenshot of the Receive page -->
-![Receive page — download in progress](docs/images/internet-receive.png)
+![Receive page — download in progress](docs/images/I-3.png)
 
 <!-- TODO: Replace with actual screenshot of a completed transfer -->
-![Transfer complete](docs/images/internet-complete.png)
+![Transfer complete](docs/images/I-4.png)
 
 ---
 
@@ -75,19 +75,19 @@ mDNS (`letshare.local`) means no IP addresses need to be shared manually — tho
 ### How to use it
 
 <!-- TODO: Replace with actual screenshot of the name-entry screen -->
-![Enter the LAN room with a display name](docs/images/lan-join.png)
+![Enter the LAN room with a display name](docs/images/L-1.png)
 
 <!-- TODO: Replace with actual screenshot of the Lobby tab showing active shares -->
-![Lobby — see who's sharing and what's available](docs/images/lan-lobby.png)
+![Lobby — see who's sharing and what's available](docs/images/L-2.png)
 
 <!-- TODO: Replace with actual screenshot of the Share tab with file picker and access mode -->
-![Share tab — pick files and set access mode](docs/images/lan-share.png)
+![Share tab — pick files and set access mode](docs/images/L-3.png)
 
 <!-- TODO: Replace with actual screenshot of the PIN entry modal -->
-![PIN-protected session — enter code to join](docs/images/lan-pin.png)
+![PIN-protected session — enter code to join](docs/images/L-4.png)
 
 <!-- TODO: Replace with actual screenshot of the Download tab with live transfer stats -->
-![Download tab — live transfer stats and progress](docs/images/lan-download.png)
+![Download tab — live transfer stats and progress](docs/images/L-5.png)
 
 ---
 
@@ -310,12 +310,30 @@ docker compose --profile dev down -v
 ## Tech stack
 
 - **Frontend:** React 19, Vite 7, Tailwind CSS v4, React Router v7
-- **Backend:** Node.js 24, Express 4, Socket.io 4
+- **Backend:** Node.js 24, Express 4, SocketIo 4
 - **Transport:** WebRTC (DataChannel), Bonjour/mDNS (LAN discovery)
 - **Monorepo:** npm workspaces
 
 ---
 
-## License
+## 🎥 Demo & Project Walkthrough
 
-Add your license here.
+Watch the complete development and project walkthrough on YouTube:
+
+**▶️ LetsShare — Peer-to-Peer File Sharing**
+
+[Watch the Demo & Development Video](https://www.youtube.com/watch?v=DaInEENhhc0)
+
+The video demonstrates the development process, project architecture, Internet and LAN modes, WebRTC-based peer-to-peer file transfer, and the overall workflow of LetsShare.
+
+---
+
+## 📄 License
+
+LetsShare is open-source software licensed under the **MIT License**.
+
+You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, subject to the terms of the MIT License.
+
+See the [`LICENSE`](./LICENSE) file for the complete license text.
+
+**Copyright © 2026 Md. Sourov Ahmed**
